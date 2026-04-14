@@ -1,0 +1,34 @@
+apiVersion: chinflux.chinflux.io/v1alpha1
+kind: ChinfluxCluster
+metadata:
+  name: chinflux-single
+  namespace: default
+spec:
+  replicas: 1
+  image: chinflux:latest
+  version: "1.0.0"
+  server:
+    port: 8086
+  storage:
+    backend: local
+    volumeClaimTemplate:
+      size: 5Gi
+  flush:
+    intervalSecs: 10
+  compaction:
+    enabled: true
+  logging:
+    level: info
+    format: text
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 2Gi
+  monitoring:
+    enabled: true
+    serviceMonitor: false
+  failover:
+    enabled: false

@@ -1,0 +1,97 @@
+//go:build e2e
+// +build e2e
+
+package e2e
+
+import (
+	"fmt"
+	"strings"
+)
+
+func singleNodeCR(name string) *strings.Reader {
+	return strings.NewReader(fmt.Sprintf(`apiVersion: chinflux.chinflux.io/v1alpha1
+kind: ChinfluxCluster
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: 1
+  image: chinflux:latest
+  server:
+    port: 8086
+  storage:
+    backend: local
+    volumeClaimTemplate:
+      size: 1Gi
+  logging:
+    level: info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  monitoring:
+    enabled: false
+    serviceMonitor: false
+`, name, testNamespace))
+}
+
+func clusterCR(name string, replicas int) *strings.Reader {
+	return strings.NewReader(fmt.Sprintf(`apiVersion: chinflux.chinflux.io/v1alpha1
+kind: ChinfluxCluster
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  replicas: %d
+  image: chinflux:latest
+  server:
+    port: 8086
+  storage:
+    backend: local
+    volumeClaimTemplate:
+      size: 1Gi
+  logging:
+    level: info
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  monitoring:
+    enabled: false
+    serviceMonitor: false
+`, name, testNamespace, replicas))
+}
+
+func backupCR(name, clusterName string) *strings.Reader {
+	return strings.NewReader(fmt.Sprintf(`apiVersion: chinflux.chinflux.io/v1alpha1
+kind: ChinfluxBackup
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  clusterName: %s
+  destination:
+    s3:
+      bucket: test-backups
+      prefix: "e2e/"
+  retentionDays: 1
+`, name, testNamespace, clusterName))
+}
+
+func restoreCR(name, clusterName, backupName string) *strings.Reader {
+	return strings.NewReader(fmt.Sprintf(`apiVersion: chinflux.chinflux.io/v1alpha1
+kind: ChinfluxRestore
+metadata:
+  name: %s
+  namespace: %s
+spec:
+  clusterName: %s
+  backupName: %s
+`, name, testNamespace, clusterName, backupName))
+}
