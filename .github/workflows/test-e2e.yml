@@ -4,24 +4,30 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: test-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-e2e:
-    name: Run on Ubuntu
+    name: E2E Tests
     runs-on: self-hosted
+    container:
+      image: golang:1.25-bookworm
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
     steps:
+      - name: Install Docker CLI
+        run: curl -fsSL https://get.docker.com | sh
+
       - name: Clone the code
         uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Install the latest version of kind
+      - name: Install kind
         run: |
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)
           chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
+          mv ./kind /usr/local/bin/kind
 
       - name: Verify kind installation
         run: kind version

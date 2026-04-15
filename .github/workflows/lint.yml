@@ -4,18 +4,19 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
-    name: Run on Ubuntu
+    name: Lint
     runs-on: self-hosted
+    container:
+      image: golang:1.25-bookworm
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
 
       - name: Check linter configuration
         run: make lint-config

@@ -4,18 +4,19 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    name: Run on Ubuntu
+    name: Test
     runs-on: self-hosted
+    container:
+      image: golang:1.25-bookworm
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
 
       - name: Running Tests
         run: |
