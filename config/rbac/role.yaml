@@ -73,11 +73,11 @@ rules:
   - update
   - watch
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxbackups
-  - chinfluxclusters
-  - chinfluxrestores
+  - hyperbytedbbackups
+  - hyperbytedbclusters
+  - hyperbytedbrestores
   verbs:
   - create
   - delete
@@ -87,23 +87,35 @@ rules:
   - update
   - watch
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxbackups/finalizers
-  - chinfluxclusters/finalizers
-  - chinfluxrestores/finalizers
+  - hyperbytedbbackups/finalizers
+  - hyperbytedbclusters/finalizers
+  - hyperbytedbrestores/finalizers
   verbs:
   - update
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxbackups/status
-  - chinfluxclusters/status
-  - chinfluxrestores/status
+  - hyperbytedbbackups/status
+  - hyperbytedbclusters/status
+  - hyperbytedbrestores/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - servicemonitors
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - policy
   resources:

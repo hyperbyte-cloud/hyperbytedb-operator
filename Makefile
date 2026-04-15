@@ -65,7 +65,7 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
 # CertManager is installed by default; skip with:
 # - CERT_MANAGER_INSTALL_SKIP=true
-KIND_CLUSTER ?= chinflux-operator-test-e2e
+KIND_CLUSTER ?= hyperbytedb-operator-test-e2e
 
 .PHONY: setup-test-e2e
 setup-test-e2e: ## Set up a Kind cluster for e2e tests if it does not exist
@@ -134,10 +134,10 @@ PLATFORMS ?= linux/arm64,linux/amd64,linux/s390x,linux/ppc64le
 docker-buildx: ## Build and push docker image for the manager for cross-platform support
 	# copy existing Dockerfile and insert --platform=${BUILDPLATFORM} into Dockerfile.cross, and preserve the original Dockerfile
 	sed -e '1 s/\(^FROM\)/FROM --platform=\$$\{BUILDPLATFORM\}/; t' -e ' 1,// s//FROM --platform=\$$\{BUILDPLATFORM\}/' Dockerfile > Dockerfile.cross
-	- $(CONTAINER_TOOL) buildx create --name chinflux-operator-builder
-	$(CONTAINER_TOOL) buildx use chinflux-operator-builder
+	- $(CONTAINER_TOOL) buildx create --name hyperbytedb-operator-builder
+	$(CONTAINER_TOOL) buildx use hyperbytedb-operator-builder
 	- $(CONTAINER_TOOL) buildx build --push --platform=$(PLATFORMS) --tag ${IMG} -f Dockerfile.cross .
-	- $(CONTAINER_TOOL) buildx rm chinflux-operator-builder
+	- $(CONTAINER_TOOL) buildx rm hyperbytedb-operator-builder
 	rm Dockerfile.cross
 
 .PHONY: build-installer
@@ -256,9 +256,9 @@ endef
 
 ##@ Kind (local development)
 
-KIND_CLUSTER_NAME ?= chinflux-operator-dev
-CHINFLUX_IMG ?= chinflux:latest
-OPERATOR_IMG ?= chinflux-operator:dev
+KIND_CLUSTER_NAME ?= hyperbytedb-operator-dev
+HYPERBYTEDB_IMG ?= hyperbytedb:latest
+OPERATOR_IMG ?= hyperbytedb-operator:dev
 
 .PHONY: kind-create
 kind-create: ## Create a Kind cluster for local development.
@@ -268,10 +268,10 @@ kind-create: ## Create a Kind cluster for local development.
 	esac
 
 .PHONY: kind-load
-kind-load: ## Build and load chinflux + operator images into Kind.
-	$(CONTAINER_TOOL) build -t $(CHINFLUX_IMG) ..
+kind-load: ## Build and load hyperbytedb + operator images into Kind.
+	$(CONTAINER_TOOL) build -t $(HYPERBYTEDB_IMG) ..
 	$(CONTAINER_TOOL) build -t $(OPERATOR_IMG) .
-	$(KIND) load docker-image $(CHINFLUX_IMG) --name $(KIND_CLUSTER_NAME)
+	$(KIND) load docker-image $(HYPERBYTEDB_IMG) --name $(KIND_CLUSTER_NAME)
 	$(KIND) load docker-image $(OPERATOR_IMG) --name $(KIND_CLUSTER_NAME)
 
 .PHONY: kind-deploy
@@ -292,9 +292,9 @@ kind-clean: ## Delete the Kind cluster.
 ## Helm binary to use for deploying the chart
 HELM ?= helm
 ## Namespace to deploy the Helm release
-HELM_NAMESPACE ?= chinflux-operator-system
+HELM_NAMESPACE ?= hyperbytedb-operator-system
 ## Name of the Helm release
-HELM_RELEASE ?= chinflux-operator
+HELM_RELEASE ?= hyperbytedb-operator
 ## Path to the Helm chart directory
 HELM_CHART_DIR ?= dist/chart
 ## Additional arguments to pass to helm commands

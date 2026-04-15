@@ -3,23 +3,23 @@ kind: Namespace
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
+    app.kubernetes.io/name: hyperbytedb-operator
     control-plane: controller-manager
-  name: chinflux-operator-system
+  name: hyperbytedb-operator-system
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: chinfluxbackups.chinflux.chinflux.io
+  name: hyperbytedbbackups.hyperbytedb.hyperbytedb.io
 spec:
-  group: chinflux.chinflux.io
+  group: hyperbytedb.hyperbytedb.io
   names:
-    kind: ChinfluxBackup
-    listKind: ChinfluxBackupList
-    plural: chinfluxbackups
-    singular: chinfluxbackup
+    kind: HyperbytedbBackup
+    listKind: HyperbytedbBackupList
+    plural: hyperbytedbbackups
+    singular: hyperbytedbbackup
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -41,7 +41,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ChinfluxBackup is the Schema for the chinfluxbackups API.
+        description: HyperbytedbBackup is the Schema for the hyperbytedbbackups API.
         properties:
           apiVersion:
             description: |-
@@ -61,14 +61,8 @@ spec:
           metadata:
             type: object
           spec:
-            description: ChinfluxBackupSpec defines the desired state of ChinfluxBackup.
+            description: HyperbytedbBackupSpec defines the desired state of HyperbytedbBackup.
             properties:
-              backupType:
-                default: full
-                enum:
-                - full
-                - incremental
-                type: string
               clusterName:
                 minLength: 1
                 type: string
@@ -114,7 +108,7 @@ spec:
             - destination
             type: object
           status:
-            description: ChinfluxBackupStatus defines the observed state of ChinfluxBackup.
+            description: HyperbytedbBackupStatus defines the observed state of HyperbytedbBackup.
             properties:
               backupPath:
                 description: S3 path where the backup was stored.
@@ -213,14 +207,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: chinfluxclusters.chinflux.chinflux.io
+  name: hyperbytedbclusters.hyperbytedb.hyperbytedb.io
 spec:
-  group: chinflux.chinflux.io
+  group: hyperbytedb.hyperbytedb.io
   names:
-    kind: ChinfluxCluster
-    listKind: ChinfluxClusterList
-    plural: chinfluxclusters
-    singular: chinfluxcluster
+    kind: HyperbytedbCluster
+    listKind: HyperbytedbClusterList
+    plural: hyperbytedbclusters
+    singular: hyperbytedbcluster
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -242,7 +236,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ChinfluxCluster is the Schema for the chinfluxclusters API.
+        description: HyperbytedbCluster is the Schema for the hyperbytedbclusters API.
         properties:
           apiVersion:
             description: |-
@@ -262,7 +256,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: ChinfluxClusterSpec defines the desired state of ChinfluxCluster.
+            description: HyperbytedbClusterSpec defines the desired state of HyperbytedbCluster.
             properties:
               additionalVolumeMounts:
                 items:
@@ -3180,7 +3174,7 @@ spec:
                 properties:
                   antiEntropyEnabled:
                     default: true
-                    description: When false, chinflux does not run periodic Merkle
+                    description: When false, hyperbytedb does not run periodic Merkle
                       verify / delta sync.
                     type: boolean
                   antiEntropyIntervalSecs:
@@ -3299,7 +3293,7 @@ spec:
                     type: integer
                 type: object
               image:
-                default: chinflux:latest
+                default: hyperbytedb:latest
                 type: string
               imagePullPolicy:
                 description: PullPolicy describes a policy for if/when to pull a container
@@ -3345,10 +3339,6 @@ spec:
                 properties:
                   enabled:
                     default: true
-                    type: boolean
-                  grafanaDashboard:
-                    description: Provision a Grafana dashboard ConfigMap with the
-                      grafana_dashboard label.
                     type: boolean
                   serviceMonitor:
                     default: true
@@ -3729,13 +3719,10 @@ spec:
                   type: object
                 type: array
               version:
-                description: |-
-                  Explicit version tag for upgrade orchestration. When changed the
-                  operator performs a rolling upgrade one pod at a time.
                 type: string
             type: object
           status:
-            description: ChinfluxClusterStatus defines the observed state of ChinfluxCluster.
+            description: HyperbytedbClusterStatus defines the observed state of HyperbytedbCluster.
             properties:
               clusterState:
                 description: 'High-level cluster health: Healthy, Degraded, Recovering,
@@ -3826,7 +3813,7 @@ spec:
                         ordinal.
                       type: string
                     nodeId:
-                      description: Chinflux node_id (ordinal + 1).
+                      description: Hyperbytedb node_id (ordinal + 1).
                       format: int32
                       type: integer
                     parquetFiles:
@@ -3892,14 +3879,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: chinfluxrestores.chinflux.chinflux.io
+  name: hyperbytedbrestores.hyperbytedb.hyperbytedb.io
 spec:
-  group: chinflux.chinflux.io
+  group: hyperbytedb.hyperbytedb.io
   names:
-    kind: ChinfluxRestore
-    listKind: ChinfluxRestoreList
-    plural: chinfluxrestores
-    singular: chinfluxrestore
+    kind: HyperbytedbRestore
+    listKind: HyperbytedbRestoreList
+    plural: hyperbytedbrestores
+    singular: hyperbytedbrestore
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -3918,7 +3905,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ChinfluxRestore is the Schema for the chinfluxrestores API.
+        description: HyperbytedbRestore is the Schema for the hyperbytedbrestores API.
         properties:
           apiVersion:
             description: |-
@@ -3938,7 +3925,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: ChinfluxRestoreSpec defines the desired state of ChinfluxRestore.
+            description: HyperbytedbRestoreSpec defines the desired state of HyperbytedbRestore.
             properties:
               backupName:
                 minLength: 1
@@ -3978,7 +3965,7 @@ spec:
             - clusterName
             type: object
           status:
-            description: ChinfluxRestoreStatus defines the observed state of ChinfluxRestore.
+            description: HyperbytedbRestoreStatus defines the observed state of HyperbytedbRestore.
             properties:
               completionTime:
                 format: date-time
@@ -4049,7 +4036,6 @@ spec:
                 - Pending
                 - ScalingDown
                 - Restoring
-                - ScalingUp
                 - Completed
                 - Failed
                 type: string
@@ -4074,18 +4060,18 @@ kind: ServiceAccount
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
-  name: chinflux-operator-controller-manager
-  namespace: chinflux-operator-system
+    app.kubernetes.io/name: hyperbytedb-operator
+  name: hyperbytedb-operator-controller-manager
+  namespace: hyperbytedb-operator-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
-  name: chinflux-operator-leader-election-role
-  namespace: chinflux-operator-system
+    app.kubernetes.io/name: hyperbytedb-operator
+  name: hyperbytedb-operator-leader-election-role
+  namespace: hyperbytedb-operator-system
 rules:
 - apiGroups:
   - ""
@@ -4124,19 +4110,19 @@ kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
-  name: chinflux-operator-chinfluxbackup-admin-role
+    app.kubernetes.io/name: hyperbytedb-operator
+  name: hyperbytedb-operator-hyperbytedbbackup-admin-role
 rules:
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxbackups
+  - hyperbytedbbackups
   verbs:
   - '*'
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxbackups/status
+  - hyperbytedbbackups/status
   verbs:
   - get
 ---
@@ -4145,13 +4131,13 @@ kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
-  name: chinflux-operator-chinfluxbackup-editor-role
+    app.kubernetes.io/name: hyperbytedb-operator
+  name: hyperbytedb-operator-hyperbytedbbackup-editor-role
 rules:
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxbackups
+  - hyperbytedbbackups
   verbs:
   - create
   - delete
@@ -4161,9 +4147,9 @@ rules:
   - update
   - watch
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxbackups/status
+  - hyperbytedbbackups/status
   verbs:
   - get
 ---
@@ -4172,21 +4158,21 @@ kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
-  name: chinflux-operator-chinfluxbackup-viewer-role
+    app.kubernetes.io/name: hyperbytedb-operator
+  name: hyperbytedb-operator-hyperbytedbbackup-viewer-role
 rules:
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxbackups
+  - hyperbytedbbackups
   verbs:
   - get
   - list
   - watch
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxbackups/status
+  - hyperbytedbbackups/status
   verbs:
   - get
 ---
@@ -4195,19 +4181,19 @@ kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
-  name: chinflux-operator-chinfluxcluster-admin-role
+    app.kubernetes.io/name: hyperbytedb-operator
+  name: hyperbytedb-operator-hyperbytedbcluster-admin-role
 rules:
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxclusters
+  - hyperbytedbclusters
   verbs:
   - '*'
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxclusters/status
+  - hyperbytedbclusters/status
   verbs:
   - get
 ---
@@ -4216,13 +4202,13 @@ kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
-  name: chinflux-operator-chinfluxcluster-editor-role
+    app.kubernetes.io/name: hyperbytedb-operator
+  name: hyperbytedb-operator-hyperbytedbcluster-editor-role
 rules:
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxclusters
+  - hyperbytedbclusters
   verbs:
   - create
   - delete
@@ -4232,9 +4218,9 @@ rules:
   - update
   - watch
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxclusters/status
+  - hyperbytedbclusters/status
   verbs:
   - get
 ---
@@ -4243,21 +4229,21 @@ kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
-  name: chinflux-operator-chinfluxcluster-viewer-role
+    app.kubernetes.io/name: hyperbytedb-operator
+  name: hyperbytedb-operator-hyperbytedbcluster-viewer-role
 rules:
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxclusters
+  - hyperbytedbclusters
   verbs:
   - get
   - list
   - watch
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxclusters/status
+  - hyperbytedbclusters/status
   verbs:
   - get
 ---
@@ -4266,19 +4252,19 @@ kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
-  name: chinflux-operator-chinfluxrestore-admin-role
+    app.kubernetes.io/name: hyperbytedb-operator
+  name: hyperbytedb-operator-hyperbytedbrestore-admin-role
 rules:
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxrestores
+  - hyperbytedbrestores
   verbs:
   - '*'
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxrestores/status
+  - hyperbytedbrestores/status
   verbs:
   - get
 ---
@@ -4287,13 +4273,13 @@ kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
-  name: chinflux-operator-chinfluxrestore-editor-role
+    app.kubernetes.io/name: hyperbytedb-operator
+  name: hyperbytedb-operator-hyperbytedbrestore-editor-role
 rules:
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxrestores
+  - hyperbytedbrestores
   verbs:
   - create
   - delete
@@ -4303,9 +4289,9 @@ rules:
   - update
   - watch
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxrestores/status
+  - hyperbytedbrestores/status
   verbs:
   - get
 ---
@@ -4314,28 +4300,28 @@ kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
-  name: chinflux-operator-chinfluxrestore-viewer-role
+    app.kubernetes.io/name: hyperbytedb-operator
+  name: hyperbytedb-operator-hyperbytedbrestore-viewer-role
 rules:
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxrestores
+  - hyperbytedbrestores
   verbs:
   - get
   - list
   - watch
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxrestores/status
+  - hyperbytedbrestores/status
   verbs:
   - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: chinflux-operator-manager-role
+  name: hyperbytedb-operator-manager-role
 rules:
 - apiGroups:
   - ""
@@ -4406,11 +4392,11 @@ rules:
   - update
   - watch
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxbackups
-  - chinfluxclusters
-  - chinfluxrestores
+  - hyperbytedbbackups
+  - hyperbytedbclusters
+  - hyperbytedbrestores
   verbs:
   - create
   - delete
@@ -4420,23 +4406,35 @@ rules:
   - update
   - watch
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxbackups/finalizers
-  - chinfluxclusters/finalizers
-  - chinfluxrestores/finalizers
+  - hyperbytedbbackups/finalizers
+  - hyperbytedbclusters/finalizers
+  - hyperbytedbrestores/finalizers
   verbs:
   - update
 - apiGroups:
-  - chinflux.chinflux.io
+  - hyperbytedb.hyperbytedb.io
   resources:
-  - chinfluxbackups/status
-  - chinfluxclusters/status
-  - chinfluxrestores/status
+  - hyperbytedbbackups/status
+  - hyperbytedbclusters/status
+  - hyperbytedbrestores/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - monitoring.coreos.com
+  resources:
+  - servicemonitors
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 - apiGroups:
   - policy
   resources:
@@ -4453,7 +4451,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: chinflux-operator-metrics-auth-role
+  name: hyperbytedb-operator-metrics-auth-role
 rules:
 - apiGroups:
   - authentication.k8s.io
@@ -4471,7 +4469,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: chinflux-operator-metrics-reader
+  name: hyperbytedb-operator-metrics-reader
 rules:
 - nonResourceURLs:
   - /metrics
@@ -4483,56 +4481,56 @@ kind: RoleBinding
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
-  name: chinflux-operator-leader-election-rolebinding
-  namespace: chinflux-operator-system
+    app.kubernetes.io/name: hyperbytedb-operator
+  name: hyperbytedb-operator-leader-election-rolebinding
+  namespace: hyperbytedb-operator-system
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: chinflux-operator-leader-election-role
+  name: hyperbytedb-operator-leader-election-role
 subjects:
 - kind: ServiceAccount
-  name: chinflux-operator-controller-manager
-  namespace: chinflux-operator-system
+  name: hyperbytedb-operator-controller-manager
+  namespace: hyperbytedb-operator-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
-  name: chinflux-operator-manager-rolebinding
+    app.kubernetes.io/name: hyperbytedb-operator
+  name: hyperbytedb-operator-manager-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: chinflux-operator-manager-role
+  name: hyperbytedb-operator-manager-role
 subjects:
 - kind: ServiceAccount
-  name: chinflux-operator-controller-manager
-  namespace: chinflux-operator-system
+  name: hyperbytedb-operator-controller-manager
+  namespace: hyperbytedb-operator-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: chinflux-operator-metrics-auth-rolebinding
+  name: hyperbytedb-operator-metrics-auth-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: chinflux-operator-metrics-auth-role
+  name: hyperbytedb-operator-metrics-auth-role
 subjects:
 - kind: ServiceAccount
-  name: chinflux-operator-controller-manager
-  namespace: chinflux-operator-system
+  name: hyperbytedb-operator-controller-manager
+  namespace: hyperbytedb-operator-system
 ---
 apiVersion: v1
 kind: Service
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
+    app.kubernetes.io/name: hyperbytedb-operator
     control-plane: controller-manager
-  name: chinflux-operator-controller-manager-metrics-service
-  namespace: chinflux-operator-system
+  name: hyperbytedb-operator-controller-manager-metrics-service
+  namespace: hyperbytedb-operator-system
 spec:
   ports:
   - name: https
@@ -4540,7 +4538,7 @@ spec:
     protocol: TCP
     targetPort: 8443
   selector:
-    app.kubernetes.io/name: chinflux-operator
+    app.kubernetes.io/name: hyperbytedb-operator
     control-plane: controller-manager
 ---
 apiVersion: apps/v1
@@ -4548,22 +4546,22 @@ kind: Deployment
 metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: chinflux-operator
+    app.kubernetes.io/name: hyperbytedb-operator
     control-plane: controller-manager
-  name: chinflux-operator-controller-manager
-  namespace: chinflux-operator-system
+  name: hyperbytedb-operator-controller-manager
+  namespace: hyperbytedb-operator-system
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: chinflux-operator
+      app.kubernetes.io/name: hyperbytedb-operator
       control-plane: controller-manager
   template:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
       labels:
-        app.kubernetes.io/name: chinflux-operator
+        app.kubernetes.io/name: hyperbytedb-operator
         control-plane: controller-manager
     spec:
       containers:
@@ -4609,6 +4607,6 @@ spec:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
-      serviceAccountName: chinflux-operator-controller-manager
+      serviceAccountName: hyperbytedb-operator-controller-manager
       terminationGracePeriodSeconds: 10
       volumes: []

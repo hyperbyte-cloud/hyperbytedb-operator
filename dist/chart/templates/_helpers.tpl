@@ -1,7 +1,7 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "chinflux-operator.name" -}}
+{{- define "hyperbytedb-operator.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
@@ -10,7 +10,7 @@ Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 If release name contains chart name it will be used as a full name.
 */}}
-{{- define "chinflux-operator.fullname" -}}
+{{- define "hyperbytedb-operator.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
 {{- else }}
@@ -27,7 +27,7 @@ If release name contains chart name it will be used as a full name.
 Namespace for generated references.
 Always uses the Helm release namespace.
 */}}
-{{- define "chinflux-operator.namespaceName" -}}
+{{- define "hyperbytedb-operator.namespaceName" -}}
 {{- .Release.Namespace }}
 {{- end }}
 
@@ -38,8 +38,8 @@ Takes a dict with:
   - .context: Template context (root context with .Values, .Release, etc.)
 Dynamically calculates safe truncation to ensure total name length <= 63 chars.
 */}}
-{{- define "chinflux-operator.resourceName" -}}
-{{- $fullname := include "chinflux-operator.fullname" .context }}
+{{- define "hyperbytedb-operator.resourceName" -}}
+{{- $fullname := include "hyperbytedb-operator.fullname" .context }}
 {{- $suffix := .suffix }}
 {{- $maxLen := sub 62 (len $suffix) | int }}
 {{- if gt (len $fullname) $maxLen }}

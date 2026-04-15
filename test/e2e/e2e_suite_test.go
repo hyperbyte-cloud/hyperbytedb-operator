@@ -27,16 +27,16 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/chinflux/chinflux-operator/test/utils"
+	"github.com/hyperbyte-cloud/hyperbytedb-operator/test/utils"
 )
 
 var (
-	managerImage = "chinflux-operator:dev"
+	managerImage = "hyperbytedb-operator:dev"
 )
 
 func TestE2E(t *testing.T) {
 	RegisterFailHandler(Fail)
-	_, _ = fmt.Fprintf(GinkgoWriter, "Starting chinflux-operator e2e test suite\n")
+	_, _ = fmt.Fprintf(GinkgoWriter, "Starting hyperbytedb-operator e2e test suite\n")
 	RunSpecs(t, "e2e suite")
 }
 

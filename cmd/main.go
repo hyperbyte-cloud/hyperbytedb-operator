@@ -35,9 +35,9 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	chinfluxv1alpha1 "github.com/chinflux/chinflux-operator/api/v1alpha1"
-	"github.com/chinflux/chinflux-operator/internal/chinflux"
-	"github.com/chinflux/chinflux-operator/internal/controller"
+	hyperbytedbv1alpha1 "github.com/hyperbyte-cloud/hyperbytedb-operator/api/v1alpha1"
+	"github.com/hyperbyte-cloud/hyperbytedb-operator/internal/hyperbytedb"
+	"github.com/hyperbyte-cloud/hyperbytedb-operator/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -49,7 +49,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(chinfluxv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(hyperbytedbv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -81,7 +81,7 @@ func main() {
 	flag.BoolVar(&enableHTTP2, "enable-http2", false,
 		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	opts := zap.Options{
-		Development: true,
+		Development: false,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
@@ -168,7 +168,7 @@ func main() {
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "87d2e674.chinflux.io",
+		LeaderElectionID:       "87d2e674.hyperbytedb.io",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly
@@ -186,34 +186,34 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.ChinfluxClusterReconciler{
+	if err := (&controller.HyperbytedbClusterReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("chinfluxcluster-controller"),
-		Members:  chinflux.NewMemberManager(),
+		Recorder: mgr.GetEventRecorderFor("hyperbytedbcluster-controller"),
+		Members:  hyperbytedb.NewMemberManager(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "ChinfluxCluster")
+		setupLog.Error(err, "Failed to create controller", "controller", "HyperbytedbCluster")
 		os.Exit(1)
 	}
-	if err := (&controller.ChinfluxBackupReconciler{
+	if err := (&controller.HyperbytedbBackupReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("chinfluxbackup-controller"),
+		Recorder: mgr.GetEventRecorderFor("hyperbytedbbackup-controller"),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "ChinfluxBackup")
+		setupLog.Error(err, "Failed to create controller", "controller", "HyperbytedbBackup")
 		os.Exit(1)
 	}
-	if err := (&controller.ChinfluxRestoreReconciler{
+	if err := (&controller.HyperbytedbRestoreReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("chinfluxrestore-controller"),
+		Recorder: mgr.GetEventRecorderFor("hyperbytedbrestore-controller"),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "ChinfluxRestore")
+		setupLog.Error(err, "Failed to create controller", "controller", "HyperbytedbRestore")
 		os.Exit(1)
 	}
 	if enableWebhooks {
-		if err := chinfluxv1alpha1.SetupChinfluxClusterWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "Failed to create webhook", "webhook", "ChinfluxCluster")
+		if err := hyperbytedbv1alpha1.SetupHyperbytedbClusterWebhookWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to create webhook", "webhook", "HyperbytedbCluster")
 			os.Exit(1)
 		}
 	}

@@ -1,4 +1,4 @@
-# chinflux-operator - AI Agent Guide
+# hyperbytedb-operator - AI Agent Guide
 
 ## Project Structure
 

@@ -29,7 +29,7 @@ jobs:
       - name: Create kind cluster
         run: kind create cluster
 
-      - name: Prepare chinflux-operator
+      - name: Prepare hyperbytedb-operator
         run: |
           go mod tidy
           make docker-build IMG=controller:latest
@@ -63,7 +63,7 @@ jobs:
 
       - name: Deploy manager via Helm
         run: |
-          make helm-deploy IMG=chinflux-operator:v0.1.0
+          make helm-deploy IMG=hyperbytedb-operator:v0.1.0
 
       - name: Check Helm release status
         run: |

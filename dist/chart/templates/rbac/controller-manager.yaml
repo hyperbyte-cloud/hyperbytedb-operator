@@ -3,8 +3,8 @@ kind: ServiceAccount
 metadata:
   labels:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
-    app.kubernetes.io/name: {{ include "chinflux-operator.name" . }}
+    app.kubernetes.io/name: {{ include "hyperbytedb-operator.name" . }}
     helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-  name: {{ include "chinflux-operator.resourceName" (dict "suffix" "controller-manager" "context" $) }}
+  name: {{ include "hyperbytedb-operator.resourceName" (dict "suffix" "controller-manager" "context" $) }}
   namespace: {{ .Release.Namespace }}

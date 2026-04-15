@@ -1,0 +1,35 @@
+apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+kind: HyperbytedbCluster
+metadata:
+  name: hyperbytedb-tls
+  namespace: default
+spec:
+  replicas: 3
+  image: hyperbytedb:latest
+  version: "1.0.0"
+  server:
+    port: 8086
+    tls:
+      enabled: true
+      # Omit secretName to let the operator generate a self-signed certificate.
+      # Provide secretName to use a pre-existing TLS Secret.
+      # secretName: hyperbytedb-tls-cert
+  storage:
+    backend: local
+    volumeClaimTemplate:
+      size: 10Gi
+  logging:
+    level: info
+    format: json
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  failover:
+    enabled: true
+  monitoring:
+    enabled: true
+    serviceMonitor: true

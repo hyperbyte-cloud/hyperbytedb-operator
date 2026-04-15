@@ -10,19 +10,19 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /mutate-chinflux-chinflux-io-v1alpha1-chinfluxcluster
+      path: /mutate-hyperbytedb-hyperbytedb-io-v1alpha1-hyperbytedbcluster
   failurePolicy: Fail
-  name: mchinfluxcluster.kb.io
+  name: mhyperbytedbcluster.kb.io
   rules:
   - apiGroups:
-    - chinflux.chinflux.io
+    - hyperbytedb.hyperbytedb.io
     apiVersions:
     - v1alpha1
     operations:
     - CREATE
     - UPDATE
     resources:
-    - chinfluxclusters
+    - hyperbytedbclusters
   sideEffects: None
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -36,17 +36,17 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-chinflux-chinflux-io-v1alpha1-chinfluxcluster
+      path: /validate-hyperbytedb-hyperbytedb-io-v1alpha1-hyperbytedbcluster
   failurePolicy: Fail
-  name: vchinfluxcluster.kb.io
+  name: vhyperbytedbcluster.kb.io
   rules:
   - apiGroups:
-    - chinflux.chinflux.io
+    - hyperbytedb.hyperbytedb.io
     apiVersions:
     - v1alpha1
     operations:
     - CREATE
     - UPDATE
     resources:
-    - chinfluxclusters
+    - hyperbytedbclusters
   sideEffects: None
