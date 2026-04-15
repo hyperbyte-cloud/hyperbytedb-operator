@@ -1,0 +1,25 @@
+apiVersion: v2
+name: hyperbytedb-operator
+description: Kubernetes operator for managing HyperbyteDB (ChInflux) clusters, backups, and restores
+type: application
+
+version: 0.1.0
+appVersion: "0.1.0"
+
+home: https://hyperbyte-cloud.github.io/hyperbytedb/
+sources:
+  - https://github.com/hyperbyte-cloud/hyperbytedb-operator
+
+keywords:
+  - kubernetes
+  - operator
+  - hyperbytedb
+  - chinflux
+  - time-series
+  - database
+
+maintainers:
+  - name: Hyperbyte Cloud
+
+annotations:
+  kubebuilder.io/generated-by: kubebuilder
