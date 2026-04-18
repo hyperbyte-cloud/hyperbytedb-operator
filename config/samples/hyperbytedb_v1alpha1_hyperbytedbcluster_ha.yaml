@@ -1,0 +1,86 @@
+apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+kind: HyperbytedbCluster
+metadata:
+  name: hyperbytedb-ha
+  namespace: default
+spec:
+  replicas: 5
+  image: hyperbytedb:latest
+  version: "1.0.0"
+  server:
+    port: 8086
+    requestTimeoutSecs: 60
+    queryTimeoutSecs: 60
+  storage:
+    backend: s3
+    volumeClaimTemplate:
+      size: 50Gi
+      storageClassName: fast-ssd
+    s3:
+      bucket: hyperbytedb-data
+      prefix: "production/"
+      region: us-east-1
+      endpoint: ""
+      credentialsSecretName: hyperbytedb-s3-credentials
+  flush:
+    intervalSecs: 5
+    walSizeThresholdMb: 128
+    timeBucketDuration: "1h"
+  compaction:
+    enabled: true
+    intervalSecs: 120
+    minFilesToCompact: 4
+    targetFileSizeMb: 512
+  chdb:
+    poolSize: 8
+  auth:
+    enabled: true
+    credentialsSecretName: hyperbytedb-auth
+  logging:
+    level: info
+    format: json
+  resources:
+    requests:
+      cpu: "2"
+      memory: 4Gi
+    limits:
+      cpu: "4"
+      memory: 8Gi
+  cluster:
+    heartbeatIntervalSecs: 1
+    heartbeatMissThreshold: 3
+    antiEntropyIntervalSecs: 30
+    syncMaxConcurrentFiles: 8
+    replicationMaxRetries: 10
+    raftHeartbeatIntervalMs: 200
+    raftElectionTimeoutMs: 800
+    raftSnapshotThreshold: 500
+  monitoring:
+    enabled: true
+    serviceMonitor: true
+  failover:
+    enabled: true
+    maxFailoverCount: 2
+    failoverTimeoutSecs: 180
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: DoNotSchedule
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: hyperbytedb
+          app.kubernetes.io/instance: hyperbytedb-ha
+  tolerations:
+    - key: dedicated
+      operator: Equal
+      value: hyperbytedb
+      effect: NoSchedule
+  podAnnotations:
+    prometheus.io/scrape: "true"
+  podLabels:
+    team: platform

@@ -4,18 +4,24 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    name: Run on Ubuntu
-    runs-on: ubuntu-latest
+    name: Test
+    runs-on: self-hosted
+    container:
+      image: golang:1.25-bookworm
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
+      # Required so that `go list`/`go test` can run `git` for VCS stamping
+      # inside the container without hitting "dubious ownership" errors.
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Running Tests
         run: |

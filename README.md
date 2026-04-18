@@ -1,121 +1,173 @@
-# chinflux-operator
-// TODO(user): Add simple overview of use/purpose
+# HyperbyteDB Operator
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+Kubernetes operator for managing HyperbyteDB clusters, backups, and restores.
 
-## Getting Started
+## Prerequisites
 
-### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+- Kubernetes v1.26+
+- kubectl
+- Helm v3.8+ (required for OCI registry support)
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+## Installation
+
+The operator is published as both a container image and a Helm chart on
+GitHub Container Registry (GHCR / GitHub Packages):
+
+| Artifact          | Reference                                                              |
+| ----------------- | ---------------------------------------------------------------------- |
+| Operator image    | `ghcr.io/hyperbyte-cloud/hyperbytedb-operator`                         |
+| Helm chart (OCI)  | `oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator`            |
+
+Both artifacts are released together — installing chart version `X.Y.Z` will
+deploy the matching `vX.Y.Z` operator image by default.
+
+### Install the latest release
 
 ```sh
-make docker-build docker-push IMG=<some-registry>/chinflux-operator:tag
+helm install hyperbytedb-operator \
+  oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator \
+  --namespace hyperbytedb-operator-system \
+  --create-namespace
 ```
 
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
-
-**Install the CRDs into the cluster:**
+### Install a specific version
 
 ```sh
+helm install hyperbytedb-operator \
+  oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator \
+  --version 0.1.0 \
+  --namespace hyperbytedb-operator-system \
+  --create-namespace
+```
+
+You can browse all published versions on the
+[hyperbytedb-operator packages page](https://github.com/orgs/hyperbyte-cloud/packages?repo_name=hyperbytedb-operator).
+
+### Snapshot / pre-release builds
+
+Every push to `main` publishes a snapshot chart and image tagged with the
+short commit SHA, e.g. `0.0.0-sha.abc1234`. To install one:
+
+```sh
+helm install hyperbytedb-operator \
+  oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator \
+  --version 0.0.0-sha.abc1234 \
+  --namespace hyperbytedb-operator-system \
+  --create-namespace
+```
+
+### Common configuration
+
+```sh
+helm install hyperbytedb-operator \
+  oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator \
+  --namespace hyperbytedb-operator-system \
+  --create-namespace \
+  --set manager.replicas=2 \
+  --set rbacHelpers.enable=true \
+  --set prometheus.enable=true
+```
+
+See [`dist/chart/values.yaml`](dist/chart/values.yaml) for the full list of
+configurable values.
+
+### Upgrade
+
+```sh
+helm upgrade hyperbytedb-operator \
+  oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator \
+  --version 0.2.0 \
+  --namespace hyperbytedb-operator-system \
+  --reuse-values
+```
+
+### Uninstall
+
+```sh
+helm uninstall hyperbytedb-operator --namespace hyperbytedb-operator-system
+```
+
+CRDs are retained on uninstall by default (`crd.keep=true`). To remove them
+explicitly:
+
+```sh
+kubectl delete crd \
+  hyperbytedbclusters.hyperbytedb.hyperbytedb.io \
+  hyperbytedbbackups.hyperbytedb.hyperbytedb.io \
+  hyperbytedbrestores.hyperbytedb.hyperbytedb.io
+```
+
+### Install from source (development)
+
+To install directly from a checkout of this repository, e.g. for local
+testing of un-released changes:
+
+```sh
+helm install hyperbytedb-operator dist/chart \
+  --namespace hyperbytedb-operator-system \
+  --create-namespace \
+  --set manager.image.repository=ghcr.io/hyperbyte-cloud/hyperbytedb-operator \
+  --set manager.image.tag=latest
+```
+
+## Deploy a Cluster
+
+```yaml
+apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+kind: HyperbytedbCluster
+metadata:
+  name: my-cluster
+spec:
+  replicas: 3
+  image: hyperbytedb:latest
+  storage:
+    volumeClaimTemplate:
+      size: 10Gi
+  monitoring:
+    enabled: true
+    serviceMonitor: true
+```
+
+```sh
+kubectl apply -f cluster.yaml
+```
+
+## Custom Resource Definitions
+
+The operator manages three CRDs:
+
+- **HyperbytedbCluster** -- Declares a HyperbyteDB cluster with configurable replicas, storage, networking, monitoring, autoscaling, and failover.
+- **HyperbytedbBackup** -- Defines one-shot or scheduled backups to S3-compatible storage with configurable retention.
+- **HyperbytedbRestore** -- Restores a cluster from an existing backup, coordinating scale-down, data copy, and scale-up automatically.
+
+See `config/samples/` for example manifests.
+
+## Development
+
+```sh
+# Build the operator binary
+make build
+
+# Run unit and integration tests
+make test
+
+# Build the container image
+make docker-build IMG=<registry>/hyperbytedb-operator:<tag>
+
+# Push the container image
+make docker-push IMG=<registry>/hyperbytedb-operator:<tag>
+
+# Install CRDs into the current cluster
 make install
-```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+# Deploy the operator to the current cluster
+make deploy IMG=<registry>/hyperbytedb-operator:<tag>
 
-```sh
-make deploy IMG=<some-registry>/chinflux-operator:tag
-```
-
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
-
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
-
-```sh
-kubectl apply -k config/samples/
-```
-
->**NOTE**: Ensure that the samples has default values to test it out.
-
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
-
-```sh
-kubectl delete -k config/samples/
-```
-
-**Delete the APIs(CRDs) from the cluster:**
-
-```sh
-make uninstall
-```
-
-**UnDeploy the controller from the cluster:**
-
-```sh
+# Remove CRDs and the operator
 make undeploy
 ```
 
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/chinflux-operator:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/chinflux-operator/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
+Run `make help` for a full list of targets.
 
 ## License
 
@@ -132,4 +184,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-

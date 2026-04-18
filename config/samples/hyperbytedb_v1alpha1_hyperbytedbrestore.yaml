@@ -1,0 +1,16 @@
+apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+kind: HyperbytedbRestore
+metadata:
+  name: hyperbytedb-restore-latest
+  namespace: default
+spec:
+  clusterName: hyperbytedb-cluster
+  backupName: hyperbytedb-daily-backup
+  # source is resolved automatically from the backup CR above.
+  # Override by specifying source.s3 explicitly:
+  # source:
+  #   s3:
+  #     bucket: hyperbytedb-backups
+  #     prefix: "daily/20260301-020000/"
+  #     region: us-east-1
+  #     credentialsSecretName: s3-backup-credentials

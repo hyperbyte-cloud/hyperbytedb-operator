@@ -20,15 +20,15 @@ resources:
 - metrics_reader_role.yaml
 # For each CRD, "Admin", "Editor" and "Viewer" roles are scaffolded by
 # default, aiding admins in cluster management. Those roles are
-# not used by the chinflux-operator itself. You can comment the following lines
+# not used by the hyperbytedb-operator itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
-- chinfluxrestore_admin_role.yaml
-- chinfluxrestore_editor_role.yaml
-- chinfluxrestore_viewer_role.yaml
-- chinfluxbackup_admin_role.yaml
-- chinfluxbackup_editor_role.yaml
-- chinfluxbackup_viewer_role.yaml
-- chinfluxcluster_admin_role.yaml
-- chinfluxcluster_editor_role.yaml
-- chinfluxcluster_viewer_role.yaml
+- hyperbytedbrestore_admin_role.yaml
+- hyperbytedbrestore_editor_role.yaml
+- hyperbytedbrestore_viewer_role.yaml
+- hyperbytedbbackup_admin_role.yaml
+- hyperbytedbbackup_editor_role.yaml
+- hyperbytedbbackup_viewer_role.yaml
+- hyperbytedbcluster_admin_role.yaml
+- hyperbytedbcluster_editor_role.yaml
+- hyperbytedbcluster_viewer_role.yaml
 

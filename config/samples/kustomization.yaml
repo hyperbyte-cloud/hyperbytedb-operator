@@ -1,9 +1,9 @@
 ## Append samples of your project ##
 resources:
-- chinflux_v1alpha1_chinfluxcluster_single.yaml
-- chinflux_v1alpha1_chinfluxcluster_cluster.yaml
-- chinflux_v1alpha1_chinfluxcluster_tls.yaml
-- chinflux_v1alpha1_chinfluxcluster_ha.yaml
-- chinflux_v1alpha1_chinfluxbackup.yaml
-- chinflux_v1alpha1_chinfluxrestore.yaml
+- hyperbytedb_v1alpha1_hyperbytedbcluster_single.yaml
+- hyperbytedb_v1alpha1_hyperbytedbcluster_cluster.yaml
+- hyperbytedb_v1alpha1_hyperbytedbcluster_tls.yaml
+- hyperbytedb_v1alpha1_hyperbytedbcluster_ha.yaml
+- hyperbytedb_v1alpha1_hyperbytedbbackup.yaml
+- hyperbytedb_v1alpha1_hyperbytedbrestore.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

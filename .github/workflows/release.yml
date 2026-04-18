@@ -1,0 +1,195 @@
+name: Release
+
+# Builds and publishes the operator container image and the Helm chart to
+# GitHub Container Registry (GHCR / GitHub Packages).
+#
+#   * Tag push (v*.*.*)         -> stable release. Image is tagged
+#                                  `vX.Y.Z` (and `latest`), the chart is
+#                                  packaged with version=appVersion=X.Y.Z and
+#                                  pushed to oci://ghcr.io/<owner>/charts.
+#                                  A GitHub Release is also created with the
+#                                  packaged .tgz attached.
+#
+#   * Push to main              -> snapshot. Image is tagged `main-<sha>`,
+#                                  chart is packaged as `0.0.0-sha.<sha>` and
+#                                  pushed to the same OCI repo so PR/dev
+#                                  consumers can pull a known revision.
+#
+#   * workflow_dispatch         -> manual snapshot, same as a push to main.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Don't cancel an in-flight tag release; it produces an immutable artifact.
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # needed by softprops/action-gh-release on tag pushes
+  packages: write   # needed to push images and charts to GHCR
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/hyperbytedb-operator
+  CHART_OCI_REPO: oci://ghcr.io/${{ github.repository_owner }}/charts
+
+jobs:
+  versions:
+    name: Compute versions
+    runs-on: self-hosted
+    container:
+      image: debian:bookworm-slim
+    outputs:
+      chart_version: ${{ steps.compute.outputs.chart_version }}
+      image_tag:     ${{ steps.compute.outputs.image_tag }}
+      is_release:    ${{ steps.compute.outputs.is_release }}
+    steps:
+      - name: Compute versions
+        id: compute
+        run: |
+          set -eu
+          if [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            echo "chart_version=$VERSION"   >> "$GITHUB_OUTPUT"
+            echo "image_tag=v$VERSION"      >> "$GITHUB_OUTPUT"
+            echo "is_release=true"          >> "$GITHUB_OUTPUT"
+          else
+            SHORT="$(echo "$GITHUB_SHA" | cut -c1-7)"
+            echo "chart_version=0.0.0-sha.${SHORT}" >> "$GITHUB_OUTPUT"
+            echo "image_tag=main-${SHORT}"          >> "$GITHUB_OUTPUT"
+            echo "is_release=false"                 >> "$GITHUB_OUTPUT"
+          fi
+
+  image:
+    name: Build & push operator image
+    needs: versions
+    runs-on: self-hosted
+    container:
+      image: golang:1.25-bookworm
+      volumes:
+        - /var/run/docker.sock:/var/run/docker.sock
+    steps:
+      - name: Install Docker CLI
+        run: curl -fsSL https://get.docker.com | sh
+
+      - uses: actions/checkout@v4
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+      - name: Build & push image
+        env:
+          IMAGE_TAG: ${{ needs.versions.outputs.image_tag }}
+          IS_RELEASE: ${{ needs.versions.outputs.is_release }}
+        run: |
+          set -eu
+          IMAGE="${REGISTRY}/${IMAGE_NAME}"
+          docker build -t "${IMAGE}:${IMAGE_TAG}" .
+          docker push "${IMAGE}:${IMAGE_TAG}"
+          if [ "$IS_RELEASE" = "true" ]; then
+            docker tag  "${IMAGE}:${IMAGE_TAG}" "${IMAGE}:latest"
+            docker push "${IMAGE}:latest"
+          fi
+
+  chart:
+    name: Package & push helm chart
+    needs: [versions, image]
+    runs-on: self-hosted
+    container:
+      image: alpine:3.20
+    steps:
+      - name: Install dependencies
+        run: apk add --no-cache bash ca-certificates curl git tar yq
+
+      - name: Install Helm
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - uses: actions/checkout@v4
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+
+      - name: Stamp default image tag in values.yaml
+        env:
+          IMAGE_TAG: ${{ needs.versions.outputs.image_tag }}
+        run: |
+          # Ensure the published chart's default image tag matches the image we
+          # just pushed. Users can still override with --set manager.image.tag.
+          yq -i '.manager.image.tag = strenv(IMAGE_TAG)' dist/chart/values.yaml
+          echo "--- Stamped values.yaml ---"
+          yq '.manager.image' dist/chart/values.yaml
+
+      - name: Lint chart
+        run: helm lint dist/chart
+
+      - name: Render chart (sanity check)
+        run: helm template hyperbytedb-operator dist/chart > /tmp/rendered.yaml
+
+      - name: Package chart
+        env:
+          CHART_VERSION: ${{ needs.versions.outputs.chart_version }}
+        run: |
+          helm package dist/chart \
+            --version     "$CHART_VERSION" \
+            --app-version "$CHART_VERSION" \
+            --destination .
+
+      - name: Push chart to GHCR
+        run: helm push hyperbytedb-operator-*.tgz "$CHART_OCI_REPO"
+
+      - name: Upload chart artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyperbytedb-operator-chart
+          path: hyperbytedb-operator-*.tgz
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: GitHub Release
+    needs: [versions, chart]
+    if: needs.versions.outputs.is_release == 'true'
+    runs-on: self-hosted
+    container:
+      image: debian:bookworm-slim
+    steps:
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y ca-certificates curl
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: hyperbytedb-operator-chart
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: hyperbytedb-operator-*.tgz
+          body: |
+            ## Install
+
+            ```sh
+            helm install hyperbytedb-operator \
+              oci://ghcr.io/${{ github.repository_owner }}/charts/hyperbytedb-operator \
+              --version ${{ needs.versions.outputs.chart_version }} \
+              --namespace hyperbytedb-operator-system \
+              --create-namespace
+            ```
+
+            ## Images
+
+            - `ghcr.io/${{ github.repository_owner }}/hyperbytedb-operator:${{ needs.versions.outputs.image_tag }}`
+            - `ghcr.io/${{ github.repository_owner }}/hyperbytedb-operator:latest`

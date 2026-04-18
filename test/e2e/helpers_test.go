@@ -9,14 +9,14 @@ import (
 )
 
 func singleNodeCR(name string) *strings.Reader {
-	return strings.NewReader(fmt.Sprintf(`apiVersion: chinflux.chinflux.io/v1alpha1
-kind: ChinfluxCluster
+	return strings.NewReader(fmt.Sprintf(`apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+kind: HyperbytedbCluster
 metadata:
   name: %s
   namespace: %s
 spec:
   replicas: 1
-  image: chinflux:latest
+  image: hyperbytedb:latest
   server:
     port: 8086
   storage:
@@ -39,14 +39,14 @@ spec:
 }
 
 func clusterCR(name string, replicas int) *strings.Reader {
-	return strings.NewReader(fmt.Sprintf(`apiVersion: chinflux.chinflux.io/v1alpha1
-kind: ChinfluxCluster
+	return strings.NewReader(fmt.Sprintf(`apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+kind: HyperbytedbCluster
 metadata:
   name: %s
   namespace: %s
 spec:
   replicas: %d
-  image: chinflux:latest
+  image: hyperbytedb:latest
   server:
     port: 8086
   storage:
@@ -69,8 +69,8 @@ spec:
 }
 
 func backupCR(name, clusterName string) *strings.Reader {
-	return strings.NewReader(fmt.Sprintf(`apiVersion: chinflux.chinflux.io/v1alpha1
-kind: ChinfluxBackup
+	return strings.NewReader(fmt.Sprintf(`apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+kind: HyperbytedbBackup
 metadata:
   name: %s
   namespace: %s
@@ -85,8 +85,8 @@ spec:
 }
 
 func restoreCR(name, clusterName, backupName string) *strings.Reader {
-	return strings.NewReader(fmt.Sprintf(`apiVersion: chinflux.chinflux.io/v1alpha1
-kind: ChinfluxRestore
+	return strings.NewReader(fmt.Sprintf(`apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+kind: HyperbytedbRestore
 metadata:
   name: %s
   namespace: %s

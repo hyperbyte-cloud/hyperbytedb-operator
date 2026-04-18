@@ -3,37 +3,41 @@
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
 cliVersion: 4.13.0
-domain: chinflux.io
+domain: hyperbytedb.io
 layout:
 - go.kubebuilder.io/v4
-projectName: chinflux-operator
-repo: github.com/chinflux/chinflux-operator
+plugins:
+  helm.kubebuilder.io/v2-alpha:
+    manifests: dist/install.yaml
+    output: dist
+projectName: hyperbytedb-operator
+repo: github.com/hyperbyte-cloud/hyperbytedb-operator
 resources:
 - api:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: chinflux.io
-  group: chinflux
-  kind: ChinfluxCluster
-  path: github.com/chinflux/chinflux-operator/api/v1alpha1
+  domain: hyperbytedb.io
+  group: hyperbytedb
+  kind: HyperbytedbCluster
+  path: github.com/hyperbyte-cloud/hyperbytedb-operator/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: chinflux.io
-  group: chinflux
-  kind: ChinfluxBackup
-  path: github.com/chinflux/chinflux-operator/api/v1alpha1
+  domain: hyperbytedb.io
+  group: hyperbytedb
+  kind: HyperbytedbBackup
+  path: github.com/hyperbyte-cloud/hyperbytedb-operator/api/v1alpha1
   version: v1alpha1
 - api:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: chinflux.io
-  group: chinflux
-  kind: ChinfluxRestore
-  path: github.com/chinflux/chinflux-operator/api/v1alpha1
+  domain: hyperbytedb.io
+  group: hyperbytedb
+  kind: HyperbytedbRestore
+  path: github.com/hyperbyte-cloud/hyperbytedb-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

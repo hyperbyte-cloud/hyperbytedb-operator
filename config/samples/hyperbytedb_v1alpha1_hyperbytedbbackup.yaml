@@ -1,0 +1,16 @@
+apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+kind: HyperbytedbBackup
+metadata:
+  name: hyperbytedb-daily-backup
+  namespace: default
+spec:
+  clusterName: hyperbytedb-cluster
+  schedule: "0 2 * * *"
+  destination:
+    s3:
+      bucket: hyperbytedb-backups
+      prefix: "daily/"
+      region: us-east-1
+      credentialsSecretName: s3-backup-credentials
+  retentionDays: 7
+  # databases: []  # Empty means all databases

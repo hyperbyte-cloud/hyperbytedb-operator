@@ -1,0 +1,55 @@
+apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+kind: HyperbytedbCluster
+metadata:
+  name: hyperbytedb-cluster
+  namespace: default
+spec:
+  replicas: 3
+  image: hyperbytedb:latest
+  version: "1.0.0"
+  server:
+    port: 8086
+    requestTimeoutSecs: 30
+    queryTimeoutSecs: 30
+  storage:
+    backend: local
+    volumeClaimTemplate:
+      size: 10Gi
+  flush:
+    intervalSecs: 10
+    walSizeThresholdMb: 64
+    timeBucketDuration: "1h"
+  compaction:
+    enabled: true
+    intervalSecs: 300
+    minFilesToCompact: 4
+    targetFileSizeMb: 256
+  chdb:
+    poolSize: 4
+  logging:
+    level: info
+    format: json
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  cluster:
+    heartbeatIntervalSecs: 2
+    heartbeatMissThreshold: 5
+    antiEntropyIntervalSecs: 60
+    replicationMaxRetries: 5
+    raftHeartbeatIntervalMs: 300
+    raftElectionTimeoutMs: 1000
+  monitoring:
+    enabled: true
+    serviceMonitor: true
+  failover:
+    enabled: true
+    maxFailoverCount: 1
+    failoverTimeoutSecs: 300
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8086"

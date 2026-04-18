@@ -1,4 +1,4 @@
-module github.com/chinflux/chinflux-operator
+module github.com/hyperbyte-cloud/hyperbytedb-operator
 
 go 1.25.3
 

@@ -27,15 +27,15 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
-	"github.com/chinflux/chinflux-operator/test/utils"
+	"github.com/hyperbyte-cloud/hyperbytedb-operator/test/utils"
 )
 
 const (
-	operatorNamespace = "chinflux-operator-system"
+	operatorNamespace = "hyperbytedb-operator-system"
 	testNamespace     = "default"
 )
 
-var _ = Describe("ChinfluxOperator", Ordered, func() {
+var _ = Describe("HyperbytedbOperator", Ordered, func() {
 	var controllerPodName string
 
 	BeforeAll(func() {
@@ -58,11 +58,11 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 
 	AfterAll(func() {
 		By("cleaning up test resources")
-		cmd := exec.Command("kubectl", "delete", "chinfluxclusters", "--all", "-n", testNamespace)
+		cmd := exec.Command("kubectl", "delete", "hyperbytedbclusters", "--all", "-n", testNamespace)
 		_, _ = utils.Run(cmd)
-		cmd = exec.Command("kubectl", "delete", "chinfluxbackups", "--all", "-n", testNamespace)
+		cmd = exec.Command("kubectl", "delete", "hyperbytedbbackups", "--all", "-n", testNamespace)
 		_, _ = utils.Run(cmd)
-		cmd = exec.Command("kubectl", "delete", "chinfluxrestores", "--all", "-n", testNamespace)
+		cmd = exec.Command("kubectl", "delete", "hyperbytedbrestores", "--all", "-n", testNamespace)
 		_, _ = utils.Run(cmd)
 
 		By("undeploying the controller-manager")
@@ -123,11 +123,11 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 		})
 	})
 
-	Context("Single-node ChinfluxCluster", func() {
+	Context("Single-node HyperbytedbCluster", func() {
 		const clusterName = "e2e-single"
 
 		It("should create a single-node cluster and reconcile all resources", func() {
-			By("applying a single-node ChinfluxCluster CR")
+			By("applying a single-node HyperbytedbCluster CR")
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = singleNodeCR(clusterName)
 			_, err := utils.Run(cmd)
@@ -171,9 +171,9 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 			}
 			Eventually(verifySTS).Should(Succeed())
 
-			By("verifying the ChinfluxCluster status phase")
+			By("verifying the HyperbytedbCluster status phase")
 			verifyPhase := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "chinfluxcluster",
+				cmd := exec.Command("kubectl", "get", "hyperbytedbcluster",
 					clusterName, "-n", testNamespace,
 					"-o", "jsonpath={.status.phase}")
 				output, err := utils.Run(cmd)
@@ -188,7 +188,7 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 		})
 
 		It("should clean up the single-node cluster", func() {
-			cmd := exec.Command("kubectl", "delete", "chinfluxcluster",
+			cmd := exec.Command("kubectl", "delete", "hyperbytedbcluster",
 				clusterName, "-n", testNamespace, "--wait=true", "--timeout=60s")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
@@ -203,11 +203,11 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 		})
 	})
 
-	Context("Multi-node ChinfluxCluster", func() {
+	Context("Multi-node HyperbytedbCluster", func() {
 		const clusterName = "e2e-cluster"
 
 		It("should create a 3-node cluster", func() {
-			By("applying a 3-node ChinfluxCluster CR")
+			By("applying a 3-node HyperbytedbCluster CR")
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = clusterCR(clusterName, 3)
 			_, err := utils.Run(cmd)
@@ -226,7 +226,7 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 
 			By("verifying the cluster status shows correct replica count")
 			verifyReplicas := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "chinfluxcluster",
+				cmd := exec.Command("kubectl", "get", "hyperbytedbcluster",
 					clusterName, "-n", testNamespace,
 					"-o", "jsonpath={.status.replicas}")
 				output, err := utils.Run(cmd)
@@ -238,7 +238,7 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 
 		It("should scale from 3 to 5 nodes", func() {
 			By("patching the cluster to 5 replicas")
-			cmd := exec.Command("kubectl", "patch", "chinfluxcluster", clusterName,
+			cmd := exec.Command("kubectl", "patch", "hyperbytedbcluster", clusterName,
 				"-n", testNamespace, "--type=merge",
 				"-p", `{"spec":{"replicas":5}}`)
 			_, err := utils.Run(cmd)
@@ -257,14 +257,14 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 		})
 
 		It("should clean up the multi-node cluster", func() {
-			cmd := exec.Command("kubectl", "delete", "chinfluxcluster",
+			cmd := exec.Command("kubectl", "delete", "hyperbytedbcluster",
 				clusterName, "-n", testNamespace, "--wait=true", "--timeout=120s")
 			_, err := utils.Run(cmd)
 			Expect(err).NotTo(HaveOccurred())
 		})
 	})
 
-	Context("ChinfluxBackup", func() {
+	Context("HyperbytedbBackup", func() {
 		const (
 			clusterName = "e2e-backup-cluster"
 			backupName  = "e2e-test-backup"
@@ -289,16 +289,16 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 		})
 
 		AfterEach(func() {
-			cmd := exec.Command("kubectl", "delete", "chinfluxbackup",
+			cmd := exec.Command("kubectl", "delete", "hyperbytedbbackup",
 				backupName, "-n", testNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
-			cmd = exec.Command("kubectl", "delete", "chinfluxcluster",
+			cmd = exec.Command("kubectl", "delete", "hyperbytedbcluster",
 				clusterName, "-n", testNamespace, "--ignore-not-found", "--wait=false")
 			_, _ = utils.Run(cmd)
 		})
 
-		It("should create a ChinfluxBackup and track status", func() {
-			By("applying a ChinfluxBackup CR")
+		It("should create a HyperbytedbBackup and track status", func() {
+			By("applying a HyperbytedbBackup CR")
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = backupCR(backupName, clusterName)
 			_, err := utils.Run(cmd)
@@ -306,7 +306,7 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 
 			By("verifying the backup status is set")
 			verifyBackup := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "chinfluxbackup",
+				cmd := exec.Command("kubectl", "get", "hyperbytedbbackup",
 					backupName, "-n", testNamespace,
 					"-o", "jsonpath={.status.phase}")
 				output, err := utils.Run(cmd)
@@ -322,7 +322,7 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 		})
 	})
 
-	Context("ChinfluxRestore", func() {
+	Context("HyperbytedbRestore", func() {
 		const (
 			clusterName = "e2e-restore-cluster"
 			restoreName = "e2e-test-restore"
@@ -348,16 +348,16 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 		})
 
 		AfterEach(func() {
-			cmd := exec.Command("kubectl", "delete", "chinfluxrestore",
+			cmd := exec.Command("kubectl", "delete", "hyperbytedbrestore",
 				restoreName, "-n", testNamespace, "--ignore-not-found")
 			_, _ = utils.Run(cmd)
-			cmd = exec.Command("kubectl", "delete", "chinfluxcluster",
+			cmd = exec.Command("kubectl", "delete", "hyperbytedbcluster",
 				clusterName, "-n", testNamespace, "--ignore-not-found", "--wait=false")
 			_, _ = utils.Run(cmd)
 		})
 
-		It("should create a ChinfluxRestore and track status", func() {
-			By("applying a ChinfluxRestore CR")
+		It("should create a HyperbytedbRestore and track status", func() {
+			By("applying a HyperbytedbRestore CR")
 			cmd := exec.Command("kubectl", "apply", "-f", "-")
 			cmd.Stdin = restoreCR(restoreName, clusterName, backupName)
 			_, err := utils.Run(cmd)
@@ -365,7 +365,7 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 
 			By("verifying the restore status is set")
 			verifyRestore := func(g Gomega) {
-				cmd := exec.Command("kubectl", "get", "chinfluxrestore",
+				cmd := exec.Command("kubectl", "get", "hyperbytedbrestore",
 					restoreName, "-n", testNamespace,
 					"-o", "jsonpath={.status.phase}")
 				output, err := utils.Run(cmd)
@@ -374,7 +374,6 @@ var _ = Describe("ChinfluxOperator", Ordered, func() {
 					Equal("Pending"),
 					Equal("ScalingDown"),
 					Equal("Restoring"),
-					Equal("ScalingUp"),
 					Equal("Completed"),
 					Equal("Failed"),
 				))
