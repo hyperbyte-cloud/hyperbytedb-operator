@@ -30,7 +30,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: HyperbytedbRestore is the Schema for the hyperbytedbrestores API.
+        description: HyperbytedbRestore is the Schema for the hyperbytedbrestores
+          API.
         properties:
           apiVersion:
             description: |-

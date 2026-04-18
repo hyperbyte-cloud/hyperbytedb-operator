@@ -36,8 +36,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	hyperbytedbv1alpha1 "github.com/hyperbyte-cloud/hyperbytedb-operator/api/v1alpha1"
-	"github.com/hyperbyte-cloud/hyperbytedb-operator/internal/hyperbytedb"
 	"github.com/hyperbyte-cloud/hyperbytedb-operator/internal/controller"
+	"github.com/hyperbyte-cloud/hyperbytedb-operator/internal/hyperbytedb"
 	// +kubebuilder:scaffold:imports
 )
 

@@ -191,12 +191,12 @@ type MeasurementManifest struct {
 
 // ParquetFileManifest describes a single parquet file.
 type ParquetFileManifest struct {
-	Path           string  `json:"path"`
-	SizeBytes      int64   `json:"size_bytes"`
-	OriginNodeID   *uint64 `json:"origin_node_id,omitempty"`
-	MinTime        int64   `json:"min_time"`
-	MaxTime        int64   `json:"max_time"`
-	Checksum       uint32  `json:"checksum"`
+	Path         string  `json:"path"`
+	SizeBytes    int64   `json:"size_bytes"`
+	OriginNodeID *uint64 `json:"origin_node_id,omitempty"`
+	MinTime      int64   `json:"min_time"`
+	MaxTime      int64   `json:"max_time"`
+	Checksum     uint32  `json:"checksum"`
 }
 
 // TotalParquetFiles returns the aggregate file count across all databases.

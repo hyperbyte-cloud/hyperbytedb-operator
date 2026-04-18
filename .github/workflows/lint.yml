@@ -18,6 +18,14 @@ jobs:
       - name: Clone the code
         uses: actions/checkout@v4
 
+      # The job container runs as root, but the checkout files are owned by the
+      # runner user. Without marking the workspace as a safe directory, any
+      # `git` invocation (including the one Go uses for VCS stamping during
+      # typecheck) fails with `exit status 128`, which surfaces as a typecheck
+      # error from golangci-lint.
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Check linter configuration
         run: make lint-config
       - name: Run linter

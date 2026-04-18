@@ -33,7 +33,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: HyperbytedbCluster is the Schema for the hyperbytedbclusters API.
+        description: HyperbytedbCluster is the Schema for the hyperbytedbclusters
+          API.
         properties:
           apiVersion:
             description: |-

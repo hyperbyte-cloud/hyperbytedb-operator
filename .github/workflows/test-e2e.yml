@@ -16,12 +16,17 @@ jobs:
       image: golang:1.25-bookworm
       volumes:
         - /var/run/docker.sock:/var/run/docker.sock
+    env:
+      KIND_CLUSTER: hyperbytedb-e2e-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Install Docker CLI
         run: curl -fsSL https://get.docker.com | sh
 
       - name: Clone the code
         uses: actions/checkout@v4
+
+      - name: Configure git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Install kind
         run: |
@@ -32,7 +37,65 @@ jobs:
       - name: Verify kind installation
         run: kind version
 
+      - name: Install kubectl
+        run: |
+          ARCH=$(go env GOARCH)
+          KUBECTL_VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
+          curl -Lo ./kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl"
+          chmod +x ./kubectl
+          mv ./kubectl /usr/local/bin/kubectl
+          kubectl version --client
+
+      # Place the kind nodes on the same docker network as this job container
+      # so the in-network kubeconfig (used below) is reachable. Without this
+      # the kubeconfig points at 127.0.0.1, which is the job container's
+      # loopback (not the host's docker daemon), and kubectl cannot reach the
+      # cluster.
+      - name: Detect job container docker network
+        run: |
+          NETWORK=$(docker inspect "$(hostname)" \
+            --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' \
+            | head -n1)
+          if [ -z "$NETWORK" ]; then
+            echo "Failed to detect docker network for $(hostname)" >&2
+            exit 1
+          fi
+          echo "Detected network: $NETWORK"
+          echo "KIND_EXPERIMENTAL_DOCKER_NETWORK=$NETWORK" >> "$GITHUB_ENV"
+
+      # Only remove clusters that belong to this workflow (or the default
+      # `kind` cluster left over from earlier ad-hoc runs) so we do not
+      # interfere with concurrent jobs (e.g. test-chart).
+      - name: Cleanup leftover e2e kind clusters
+        run: |
+          for cluster in $(kind get clusters 2>/dev/null || true); do
+            case "$cluster" in
+              kind|hyperbytedb-e2e-*|hyperbytedb-operator-test-e2e)
+                if [ "$cluster" != "$KIND_CLUSTER" ]; then
+                  echo "Deleting leftover kind cluster: $cluster"
+                  kind delete cluster --name "$cluster" || true
+                fi
+                ;;
+              *)
+                echo "Skipping unrelated kind cluster: $cluster"
+                ;;
+            esac
+          done
+
+      - name: Create kind cluster
+        run: kind create cluster --name "$KIND_CLUSTER"
+
+      - name: Configure kubeconfig for in-network access
+        run: |
+          mkdir -p "$HOME/.kube"
+          kind get kubeconfig --name "$KIND_CLUSTER" --internal > "$HOME/.kube/config"
+          kubectl get nodes
+
       - name: Running Test e2e
         run: |
           go mod tidy
-          make test-e2e
+          make test-e2e KIND_CLUSTER="$KIND_CLUSTER"
+
+      - name: Cleanup kind cluster
+        if: always()
+        run: kind delete cluster --name "$KIND_CLUSTER" || true
