@@ -18,7 +18,10 @@ jobs:
         - /var/run/docker.sock:/var/run/docker.sock
     env:
       KIND_CLUSTER_NAME: hyperbytedb-chart-${{ github.run_id }}-${{ github.run_attempt }}
-      OPERATOR_IMG: hyperbytedb-operator:v0.1.0
+      # Image tag is run-scoped so concurrent test-chart jobs sharing the host
+      # docker daemon don't race on `docker build -t <same-tag>` and load each
+      # other's half-built image into their kind cluster.
+      OPERATOR_IMG: hyperbytedb-operator:ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Install Docker CLI
         run: curl -fsSL https://get.docker.com | sh
@@ -146,3 +149,10 @@ jobs:
       - name: Cleanup kind cluster
         if: always()
         run: kind delete cluster --name "$KIND_CLUSTER_NAME" || true
+
+      # Remove the run-scoped operator image from the shared host docker
+      # daemon so we don't accumulate one image per CI run on the self-hosted
+      # runner.
+      - name: Cleanup operator image
+        if: always()
+        run: docker image rm -f "$OPERATOR_IMG" || true
