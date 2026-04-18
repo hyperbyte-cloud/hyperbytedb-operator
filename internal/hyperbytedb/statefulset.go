@@ -41,37 +41,22 @@ func BuildStatefulSet(cluster *v1alpha1.HyperbytedbCluster, configHash string) *
 	}
 
 	// --------------- init script ---------------
-	// Reads peer addresses from the operator-managed peers ConfigMap mounted
-	// at /peers instead of computing them from a hard-coded replica count.
-	initScript := `#!/bin/sh
+	// Derives this pod's NODE_ID and CLUSTER_ADDR from its StatefulSet
+	// ordinal. Peer discovery is intentionally not done here: the operator
+	// drives Raft membership via the /cluster/membership/add-node API as the
+	// StatefulSet scales, so each pod starts up with no peer knowledge and
+	// is added by the leader once it becomes reachable.
+	initScript := fmt.Sprintf(`#!/bin/sh
 set -e
 ORDINAL=$(echo "$HOSTNAME" | rev | cut -d'-' -f1 | rev)
 NODE_ID=$((ORDINAL + 1))
-echo "export HYPERBYTEDB__CLUSTER__NODE_ID=$NODE_ID" > /shared/env.sh
-
-# Own address is the entry matching our ordinal in the peers ConfigMap
-SELF_ADDR=$(cat /peers/${ORDINAL} 2>/dev/null || echo "")
-echo "export HYPERBYTEDB__CLUSTER__CLUSTER_ADDR=${SELF_ADDR}" >> /shared/env.sh
-
-# Build peer list from all entries except our own
-PEERS=""
-for f in /peers/*; do
-  KEY=$(basename "$f")
-  # Skip non-numeric keys (e.g. "replicas")
-  case "$KEY" in
-    *[!0-9]*) continue ;;
-  esac
-  if [ "$KEY" != "$ORDINAL" ]; then
-    ADDR=$(cat "$f")
-    if [ -n "$PEERS" ]; then
-      PEERS="${PEERS},${ADDR}"
-    else
-      PEERS="${ADDR}"
-    fi
-  fi
-done
-echo "export HYPERBYTEDB__CLUSTER__PEERS=${PEERS}" >> /shared/env.sh
-`
+SELF_ADDR="${HOSTNAME}.%s.%s.svc.cluster.local:%d"
+{
+  echo "export HYPERBYTEDB__CLUSTER__NODE_ID=$NODE_ID"
+  echo "export HYPERBYTEDB__CLUSTER__CLUSTER_ADDR=$SELF_ADDR"
+  echo "export HYPERBYTEDB__CLUSTER__PEERS="
+} > /shared/env.sh
+`, headlessSvc, cluster.Namespace, port)
 
 	entrypoint := `#!/bin/sh
 . /shared/env.sh
@@ -86,16 +71,6 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
 						Name: ConfigMapName(cluster),
-					},
-				},
-			},
-		},
-		{
-			Name: "peers",
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{
-						Name: PeersConfigMapName(cluster),
 					},
 				},
 			},
@@ -141,7 +116,6 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 			Command: []string{"sh", "-c", initScript},
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: "shared", MountPath: "/shared"},
-				{Name: "peers", MountPath: "/peers", ReadOnly: true},
 			},
 		},
 		{

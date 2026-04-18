@@ -20,6 +20,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
 // HyperbytedbClusterSpec defines the desired state of HyperbytedbCluster.
@@ -73,6 +74,18 @@ type HyperbytedbClusterSpec struct {
 	Cluster ClusterTuningSpec `json:"cluster,omitempty"`
 
 	// +optional
+	Cardinality CardinalitySpec `json:"cardinality,omitempty"`
+
+	// +optional
+	StatementSummary StatementSummarySpec `json:"statementSummary,omitempty"`
+
+	// +optional
+	HintedHandoff HintedHandoffSpec `json:"hintedHandoff,omitempty"`
+
+	// +optional
+	RateLimit RateLimitSpec `json:"rateLimit,omitempty"`
+
+	// +optional
 	Monitoring MonitoringSpec `json:"monitoring,omitempty"`
 
 	// +optional
@@ -117,6 +130,11 @@ type ServerSpec struct {
 
 	// +kubebuilder:default=30
 	QueryTimeoutSecs int32 `json:"queryTimeoutSecs,omitempty"`
+
+	// Maximum concurrent /query requests. 0 = unlimited.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxConcurrentQueries int32 `json:"maxConcurrentQueries,omitempty"`
 
 	// +optional
 	TLS *TLSSpec `json:"tls,omitempty"`
@@ -181,6 +199,21 @@ type FlushSpec struct {
 
 	// +kubebuilder:default="1h"
 	TimeBucketDuration string `json:"timeBucketDuration,omitempty"`
+
+	// Maximum points buffered per measurement before forcing a flush. 0 = unlimited.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxPointsPerBatch int32 `json:"maxPointsPerBatch,omitempty"`
+
+	// WAL group-commit: max entries to coalesce per write batch. 0 = disabled.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	WALBatchSize int32 `json:"walBatchSize,omitempty"`
+
+	// WAL group-commit: max microseconds to wait for more entries before flushing.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	WALBatchDelayUs int64 `json:"walBatchDelayUs,omitempty"`
 }
 
 type CompactionSpec struct {
@@ -195,6 +228,34 @@ type CompactionSpec struct {
 
 	// +kubebuilder:default=256
 	TargetFileSizeMB int32 `json:"targetFileSizeMb,omitempty"`
+
+	// Compaction time bucket. "1h" (hourly, default) or "1d" (daily). Daily
+	// buckets merge all 24 hourly files, reducing file count for wide-range queries.
+	// +optional
+	// +kubebuilder:validation:Enum="1h";"1d";"24h"
+	BucketDuration string `json:"bucketDuration,omitempty"`
+
+	// Minimum age (seconds) before per-node files are hash-verified and merged
+	// into a single compacted file.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	VerifiedCompactionAgeSecs int64 `json:"verifiedCompactionAgeSecs,omitempty"`
+
+	// When true, periodically compare each active peer's manifest against local
+	// bucket hashes and fetch divergent or missing slices.
+	// +optional
+	SelfRepairEnabled *bool `json:"selfRepairEnabled,omitempty"`
+
+	// Max bucket-hash comparisons (and repair attempts) per compaction tick for
+	// membership self-repair.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxRepairChecksPerCycle int32 `json:"maxRepairChecksPerCycle,omitempty"`
+
+	// Max concurrent measurement compactions when running compact_all.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	CompactAllMaxInflight int32 `json:"compactAllMaxInflight,omitempty"`
 }
 
 type ChDBSpec struct {
@@ -251,9 +312,125 @@ type ClusterTuningSpec struct {
 	// +kubebuilder:default=1000
 	RaftSnapshotThreshold int32 `json:"raftSnapshotThreshold,omitempty"`
 
+	// Bounded outbound replication queue depth (ingest-sized batches).
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	ReplicationQueueDepth int32 `json:"replicationQueueDepth,omitempty"`
+
+	// Max concurrent outbound replication fan-out rounds (token bucket).
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	ReplicationMaxInflightBatches int32 `json:"replicationMaxInflightBatches,omitempty"`
+
+	// Max bytes for coalescing consecutive WAL batches with the same db/rp/precision.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	ReplicationMaxCoalesceBodyBytes int64 `json:"replicationMaxCoalesceBodyBytes,omitempty"`
+
+	// Bounded apply queue on the replicate receiver.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	ReplicateReceiverQueueDepth int32 `json:"replicateReceiverQueueDepth,omitempty"`
+
+	// When >0, peers with ack 0 and stale heartbeats (older than
+	// heartbeatIntervalSecs * multiplier) are omitted from the WAL truncate barrier.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	ReplicationTruncateStalePeerMultiplier int64 `json:"replicationTruncateStalePeerMultiplier,omitempty"`
+
+	// Per-node, per-write replication mode and tuning.
+	// +optional
+	Replication *ReplicationSpec `json:"replication,omitempty"`
+
 	// TLS for inter-node replication traffic.
 	// +optional
 	TLS *TLSSpec `json:"tls,omitempty"`
+}
+
+// ReplicationSpec controls coordinator-side replication (how this node's
+// accepted client writes are replicated to peers).
+type ReplicationSpec struct {
+	// Replication mode. "async" is fire-and-forget HTTP fan-out (default,
+	// preserves today's behavior). "sync_quorum" awaits W-of-N peer acks
+	// before returning to the client.
+	// +optional
+	// +kubebuilder:default="async"
+	// +kubebuilder:validation:Enum=async;sync_quorum
+	Mode string `json:"mode,omitempty"`
+
+	// Worst-case latency budget (ms) for sync_quorum writes. On timeout the
+	// coordinator returns 504; in-flight peer tasks keep running and unacked
+	// peers fall back to hinted handoff.
+	// +optional
+	// +kubebuilder:default=5000
+	// +kubebuilder:validation:Minimum=0
+	AckTimeoutMs int64 `json:"ackTimeoutMs,omitempty"`
+
+	// +optional
+	SyncQuorum *SyncQuorumSpec `json:"syncQuorum,omitempty"`
+}
+
+// SyncQuorumSpec configures the sync_quorum replication mode.
+type SyncQuorumSpec struct {
+	// Number of peer acks required for sync_quorum. Either the string
+	// "majority" (resolved at request time against current active peers) or an
+	// explicit integer count. The local WAL append always happens first, so
+	// self-durability is implicit and the local node is never counted toward
+	// the quorum.
+	// +optional
+	MinAcks *intstr.IntOrString `json:"minAcks,omitempty"`
+}
+
+// CardinalitySpec configures cardinality limits enforced by hyperbytedb.
+type CardinalitySpec struct {
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxTagValuesPerMeasurement int64 `json:"maxTagValuesPerMeasurement,omitempty"`
+
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxMeasurementsPerDatabase int64 `json:"maxMeasurementsPerDatabase,omitempty"`
+}
+
+// StatementSummarySpec controls collection of per-statement execution stats
+// exposed via /debug/statement_summary.
+type StatementSummarySpec struct {
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Maximum number of distinct statements tracked. Oldest entries are evicted
+	// when the limit is exceeded.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxEntries int32 `json:"maxEntries,omitempty"`
+}
+
+// HintedHandoffSpec configures the hinted-handoff queue used to retry writes
+// against peers that were temporarily unreachable.
+type HintedHandoffSpec struct {
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Maximum queued hints per unreachable peer before oldest are dropped.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxHintsPerPeer int64 `json:"maxHintsPerPeer,omitempty"`
+
+	// Hints older than this (seconds) are discarded on drain.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxHintAgeSecs int64 `json:"maxHintAgeSecs,omitempty"`
+}
+
+// RateLimitSpec controls per-endpoint request rate limiting.
+type RateLimitSpec struct {
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Maximum requests per second per endpoint (/write, /query). 0 = unlimited.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxRequestsPerSecond int64 `json:"maxRequestsPerSecond,omitempty"`
 }
 
 type MonitoringSpec struct {

@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"sort"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -148,9 +147,11 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return r.setFailedStatus(ctx, cluster, "ConfigMapFailed", err)
 	}
 
-	// 3. Peers ConfigMap
-	if err := r.reconcilePeersConfigMap(ctx, cluster, replicas); err != nil {
-		return r.setFailedStatus(ctx, cluster, "PeersConfigMapFailed", err)
+	// 3. (was: peers ConfigMap) — peers are now driven by the operator via
+	// the /cluster/membership/add-node API in step 13. Garbage-collect any
+	// legacy peers ConfigMap left over from older operator versions.
+	if err := r.cleanupLegacyPeersConfigMap(ctx, cluster); err != nil {
+		log.V(1).Info("Could not delete legacy peers ConfigMap", "error", err)
 	}
 
 	// 4. Headless Service
@@ -215,9 +216,11 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 	cluster.Status.Members = memberStatuses
 	cluster.Status.ClusterState = hyperbytedb.DeriveClusterState(memberStatuses)
 
-	// 13. Cluster topology verification (multi-node only)
+	// 13. Cluster membership reconciliation (multi-node only).
+	// Asks the Raft leader (via API) to add any pod that is reachable but
+	// not yet a Raft voter. This replaces the old static peers ConfigMap.
 	if replicas > 1 {
-		r.verifyClusterTopology(ctx, cluster, replicas)
+		r.reconcileClusterMembership(ctx, cluster, replicas)
 	}
 
 	// 14. Replication health monitoring (multi-node only)
@@ -299,28 +302,23 @@ func (r *HyperbytedbClusterReconciler) reconcileConfigMap(ctx context.Context, c
 	return nil
 }
 
-// ---------- Peers ConfigMap ----------
+// ---------- Legacy Peers ConfigMap cleanup ----------
 
-func (r *HyperbytedbClusterReconciler) reconcilePeersConfigMap(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, replicas int32) error {
-	desired := hyperbytedb.BuildPeersConfigMap(cluster, cluster.Namespace, replicas)
-	if err := controllerutil.SetControllerReference(cluster, desired, r.Scheme); err != nil {
-		return err
-	}
-
+// cleanupLegacyPeersConfigMap deletes the `<cluster>-peers` ConfigMap that
+// older versions of the operator generated to seed the static peer list in
+// each pod. With API-driven membership, the ConfigMap is no longer needed
+// and is removed on first reconcile of an upgraded cluster.
+func (r *HyperbytedbClusterReconciler) cleanupLegacyPeersConfigMap(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster) error {
+	name := cluster.Name + "-peers"
 	existing := &corev1.ConfigMap{}
-	err := r.Get(ctx, types.NamespacedName{Name: desired.Name, Namespace: desired.Namespace}, existing)
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: cluster.Namespace}, existing)
 	if apierrors.IsNotFound(err) {
-		return r.Create(ctx, desired)
+		return nil
 	}
 	if err != nil {
 		return err
 	}
-
-	if !equality.Semantic.DeepEqual(existing.Data, desired.Data) {
-		existing.Data = desired.Data
-		return r.Update(ctx, existing)
-	}
-	return nil
+	return r.Delete(ctx, existing)
 }
 
 // ---------- Service ----------
@@ -628,140 +626,177 @@ func (r *HyperbytedbClusterReconciler) reconcileHPA(ctx context.Context, cluster
 	return r.Update(ctx, existing)
 }
 
-// ---------- Cluster Topology Verification ----------
+// ---------- Cluster Membership Reconciliation (API-driven) ----------
 
-func (r *HyperbytedbClusterReconciler) verifyClusterTopology(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, replicas int32) {
+// podView is a per-pod snapshot used during membership reconciliation.
+type podView struct {
+	ordinal int32
+	host    string
+	nodeID  uint64
+	addr    string
+	// reachable means the pod responded to GetClusterNodes (HTTP up).
+	reachable bool
+	// nodes is the membership view as reported by this pod (empty when unreachable).
+	nodes []hyperbytedb.NodeInfo
+}
+
+// reconcileClusterMembership ensures every reachable pod in the StatefulSet
+// is a Raft voter, by calling the leader's /cluster/membership/add-node API
+// for any pod that is not yet in the membership.
+//
+// This replaces the older static peers-ConfigMap approach: pods now start
+// up with no knowledge of peers, and the operator is the sole driver of
+// cluster membership. As the StatefulSet scales up, each new pod becomes
+// reachable on /ping, the operator detects it, asks the leader to add it,
+// and the leader's Raft membership change propagates to all nodes.
+func (r *HyperbytedbClusterReconciler) reconcileClusterMembership(
+	ctx context.Context,
+	cluster *hyperbytedbv1alpha1.HyperbytedbCluster,
+	replicas int32,
+) {
 	log := logf.FromContext(ctx)
 	port := hyperbytedb.ServerPort(cluster)
 	stsName := hyperbytedb.StatefulSetName(cluster)
 	headlessSvc := hyperbytedb.HeadlessServiceName(cluster)
 
-	type podView struct {
-		ordinal  int32
-		host     string
-		nodeID   int32
-		nodeAddr string
-		nodes    []hyperbytedb.NodeInfo
-	}
-
-	var views []podView
+	views := make([]podView, 0, replicas)
 	for i := range replicas {
 		host := fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local",
 			stsName, i, headlessSvc, cluster.Namespace)
+		v := podView{
+			ordinal: i,
+			host:    host,
+			nodeID:  uint64(i + 1),
+			addr:    fmt.Sprintf("%s:%d", host, port),
+		}
 		nodes, err := r.Members.Client.GetClusterNodes(ctx, host, port)
 		if err != nil {
 			log.V(1).Info("Could not query cluster/nodes", "ordinal", i, "error", err)
-			continue
+		} else {
+			v.reachable = true
+			v.nodes = nodes
 		}
-		views = append(views, podView{
-			ordinal:  i,
-			host:     host,
-			nodeID:   i + 1,
-			nodeAddr: fmt.Sprintf("%s:%d", host, port),
-			nodes:    nodes,
-		})
+		views = append(views, v)
 	}
 
-	if len(views) == 0 {
+	// Find the leader by asking each reachable pod who the leader is.
+	leaderHost, leaderID := r.findLeader(ctx, views, port)
+	if leaderHost == "" {
+		log.V(1).Info("Could not locate raft leader from any pod; will retry next reconcile")
 		meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
 			Type:               "ClusterFormed",
 			Status:             metav1.ConditionFalse,
-			Reason:             "NoPodReachable",
-			Message:            "Could not query any pod for cluster topology",
+			Reason:             "NoLeader",
+			Message:            "No raft leader reachable yet",
 			LastTransitionTime: metav1.Now(),
 		})
 		return
 	}
 
-	// Build map of known nodeIDs per view and detect missing nodes
-	allExpected := make(map[int32]string, replicas)
-	for i := range replicas {
-		allExpected[i+1] = fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local:%d",
-			stsName, i, headlessSvc, cluster.Namespace, port)
-	}
-
-	// Find the leader candidate: the node with the most peers (most complete view).
-	// Sort views descending by peer count so we try the likely leader first.
-	leaderCandidates := make([]podView, len(views))
-	copy(leaderCandidates, views)
-	sort.Slice(leaderCandidates, func(i, j int) bool {
-		return len(leaderCandidates[i].nodes) > len(leaderCandidates[j].nodes)
-	})
-
-	// Collect all globally missing memberships (node missing from ANY view).
-	type missingEntry struct {
-		nodeID int32
-		addr   string
-	}
-	seen := make(map[int32]bool)
-	var missing []missingEntry
-	fullyFormed := true
+	// The leader's view is authoritative for who is currently a member.
+	knownIDs := make(map[uint64]bool)
 	for _, v := range views {
-		knownIDs := make(map[int]bool, len(v.nodes))
-		for _, n := range v.nodes {
-			knownIDs[n.NodeID] = true
-		}
-		for expectedID, expectedAddr := range allExpected {
-			if knownIDs[int(expectedID)] {
-				continue
-			}
-			fullyFormed = false
-			if !seen[expectedID] {
-				seen[expectedID] = true
-				missing = append(missing, missingEntry{nodeID: expectedID, addr: expectedAddr})
+		if v.host == leaderHost {
+			for _, n := range v.nodes {
+				knownIDs[uint64(n.NodeID)] = true
 			}
 		}
 	}
+	// Always include the leader itself, even if its own /cluster/nodes
+	// response did not list it.
+	knownIDs[leaderID] = true
 
-	// Send join requests to the leader candidate for each missing node.
-	// If the first candidate isn't the leader, try the next one.
-	for _, m := range missing {
-		joined := false
-		for _, candidate := range leaderCandidates {
-			log.Info("Sending join request to leader candidate",
-				"leaderOrdinal", candidate.ordinal, "missingNodeID", m.nodeID)
-			if err := r.Members.Client.JoinNode(ctx, candidate.host, port, int(m.nodeID), m.addr); err != nil {
-				log.V(1).Info("Join request failed, trying next candidate",
-					"target", candidate.host, "missingNodeID", m.nodeID, "error", err)
-				continue
-			}
-			joined = true
-			log.Info("Successfully joined node via leader",
-				"leaderOrdinal", candidate.ordinal, "missingNodeID", m.nodeID)
-			break
-		}
-		if !joined {
-			log.Info("Could not join node via any candidate", "missingNodeID", m.nodeID)
-		}
-	}
-
-	// Update per-member PeerCount
+	// Add any reachable pod that the leader doesn't yet know about.
+	allMembers := true
 	for _, v := range views {
+		if !v.reachable {
+			allMembers = false
+			continue
+		}
+		if knownIDs[v.nodeID] {
+			continue
+		}
+		log.Info("Asking raft leader to add node",
+			"leaderID", leaderID, "newNodeID", v.nodeID, "addr", v.addr)
+		resp, err := r.Members.Client.AddClusterNode(ctx, leaderHost, port, v.nodeID, v.addr, true)
+		if err != nil {
+			// If we hit a non-leader (rare race when leadership flips), just
+			// log and let the next reconcile rediscover the leader.
+			log.V(1).Info("add-node failed",
+				"target", leaderHost, "newNodeID", v.nodeID, "error", err)
+			allMembers = false
+			continue
+		}
+		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, "MemberAdded",
+			"Added node %d (%s) to raft cluster (promoted=%t)",
+			v.nodeID, v.addr, resp.PromotedToVoter)
+	}
+
+	// Update per-member PeerCount in status.
+	for _, v := range views {
+		if !v.reachable {
+			continue
+		}
 		for idx := range cluster.Status.Members {
-			if cluster.Status.Members[idx].NodeID == v.nodeID {
+			if uint64(cluster.Status.Members[idx].NodeID) == v.nodeID {
 				cluster.Status.Members[idx].PeerCount = int32(len(v.nodes)) - 1
 				break
 			}
 		}
 	}
 
-	if fullyFormed {
+	if allMembers && len(knownIDs) >= int(replicas) {
 		meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
 			Type:               "ClusterFormed",
 			Status:             metav1.ConditionTrue,
-			Reason:             "AllNodesVisible",
-			Message:            fmt.Sprintf("All %d nodes see the full cluster topology", len(views)),
+			Reason:             "AllNodesMembers",
+			Message:            fmt.Sprintf("All %d expected nodes are raft members", replicas),
 			LastTransitionTime: metav1.Now(),
 		})
 	} else {
 		meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
-			Type:               "ClusterFormed",
-			Status:             metav1.ConditionFalse,
-			Reason:             "TopologyIncomplete",
-			Message:            "Not all nodes have a complete view of the cluster",
+			Type:   "ClusterFormed",
+			Status: metav1.ConditionFalse,
+			Reason: "MembershipIncomplete",
+			Message: fmt.Sprintf("%d/%d expected nodes are raft members",
+				len(knownIDs), replicas),
 			LastTransitionTime: metav1.Now(),
 		})
 	}
+}
+
+// findLeader returns the (host, id) of the current Raft leader by asking
+// each reachable pod. Returns "" host if no leader is currently visible.
+func (r *HyperbytedbClusterReconciler) findLeader(
+	ctx context.Context,
+	views []podView,
+	port int32,
+) (string, uint64) {
+	log := logf.FromContext(ctx)
+	for _, v := range views {
+		if !v.reachable {
+			continue
+		}
+		info, err := r.Members.Client.GetClusterLeader(ctx, v.host, port)
+		if err != nil {
+			log.V(1).Info("Could not query cluster/leader", "host", v.host, "error", err)
+			continue
+		}
+		if info.LeaderID == nil {
+			continue
+		}
+		// Find the leader's host. If the leader is this pod, we already
+		// know the host. Otherwise look it up by ordinal.
+		if *info.LeaderID == v.nodeID {
+			return v.host, *info.LeaderID
+		}
+		for _, w := range views {
+			if w.nodeID == *info.LeaderID {
+				return w.host, *info.LeaderID
+			}
+		}
+	}
+	return "", 0
 }
 
 // ---------- Replication Health Monitoring ----------

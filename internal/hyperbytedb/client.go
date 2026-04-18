@@ -265,6 +265,110 @@ func (c *Client) JoinNode(ctx context.Context, host string, port int32, nodeID i
 	return nil
 }
 
+// LeaderInfo is the response from GET /cluster/leader.
+type LeaderInfo struct {
+	LeaderID   *uint64 `json:"leader_id"`
+	LeaderAddr *string `json:"leader_addr"`
+	ThisNodeID uint64  `json:"this_node_id"`
+	IsLeader   bool    `json:"is_leader"`
+	Term       uint64  `json:"term"`
+}
+
+// GetClusterLeader returns the Raft leader's id/address as seen by `host`.
+// Use this to find the leader to direct membership changes at.
+func (c *Client) GetClusterLeader(ctx context.Context, host string, port int32) (*LeaderInfo, error) {
+	url := fmt.Sprintf("http://%s:%d/cluster/leader", host, port)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("cluster/leader returned %d: %s", resp.StatusCode, string(body))
+	}
+	var info LeaderInfo
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil, fmt.Errorf("decoding cluster leader: %w", err)
+	}
+	return &info, nil
+}
+
+// addNodeRequest is the body for POST /cluster/membership/add-node.
+type addNodeRequest struct {
+	NodeID  uint64 `json:"node_id"`
+	Addr    string `json:"addr"`
+	Promote bool   `json:"promote"`
+}
+
+// AddNodeResponse is the response from POST /cluster/membership/add-node.
+type AddNodeResponse struct {
+	NodeID          uint64  `json:"node_id"`
+	Addr            string  `json:"addr"`
+	AddedAsLearner  bool    `json:"added_as_learner"`
+	PromotedToVoter bool    `json:"promoted_to_voter"`
+	LeaderID        *uint64 `json:"leader_id"`
+}
+
+// ErrNotLeader is returned by AddClusterNode when the target host is not the
+// Raft leader. The leader's id (if known) is in LeaderID so the caller can
+// retry against the right host.
+type ErrNotLeader struct {
+	LeaderID *uint64
+}
+
+func (e *ErrNotLeader) Error() string {
+	if e.LeaderID == nil {
+		return "target node is not the raft leader (leader unknown)"
+	}
+	return fmt.Sprintf("target node is not the raft leader (leader_id=%d)", *e.LeaderID)
+}
+
+// AddClusterNode asks `host` (which must be the current Raft leader) to add
+// the node identified by `nodeID`/`nodeAddr` as a Raft learner and, when
+// `promote` is true, promote it to a voter in the same call. Returns
+// *ErrNotLeader if the target is not currently the leader.
+func (c *Client) AddClusterNode(ctx context.Context, host string, port int32, nodeID uint64, nodeAddr string, promote bool) (*AddNodeResponse, error) {
+	url := fmt.Sprintf("http://%s:%d/cluster/membership/add-node", host, port)
+	body, err := json.Marshal(addNodeRequest{NodeID: nodeID, Addr: nodeAddr, Promote: promote})
+	if err != nil {
+		return nil, fmt.Errorf("marshalling add-node request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		var errResp struct {
+			Error    string  `json:"error"`
+			LeaderID *uint64 `json:"leader_id"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, &ErrNotLeader{LeaderID: errResp.LeaderID}
+	}
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("membership/add-node returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var out AddNodeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decoding add-node response: %w", err)
+	}
+	return &out, nil
+}
+
 // leaveRequest is the body for POST /internal/membership/leave.
 type leaveRequest struct {
 	NodeID uint64 `json:"node_id"`

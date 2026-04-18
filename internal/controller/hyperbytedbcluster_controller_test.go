@@ -73,7 +73,7 @@ var _ = Describe("HyperbytedbCluster Controller", func() {
 			}
 		})
 
-		It("should create ConfigMap, PeersConfigMap, Services, and StatefulSet", func() {
+		It("should create ConfigMap, Services, and StatefulSet (no peers ConfigMap)", func() {
 			controllerReconciler := &HyperbytedbClusterReconciler{
 				Client:   k8sClient,
 				Scheme:   k8sClient.Scheme(),
@@ -93,13 +93,13 @@ var _ = Describe("HyperbytedbCluster Controller", func() {
 			}, cm)).To(Succeed())
 			Expect(cm.Data).To(HaveKey("config.toml"))
 
-			By("verifying the peers ConfigMap was created")
+			By("verifying the legacy peers ConfigMap is NOT created")
 			peersCM := &corev1.ConfigMap{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
+			err = k8sClient.Get(ctx, types.NamespacedName{
 				Name: resourceName + "-peers", Namespace: "default",
-			}, peersCM)).To(Succeed())
-			Expect(peersCM.Data).To(HaveKey("0"))
-			Expect(peersCM.Data).To(HaveKey("replicas"))
+			}, peersCM)
+			Expect(errors.IsNotFound(err)).To(BeTrue(),
+				"peers ConfigMap should no longer be created — membership is now API-driven")
 
 			By("verifying the headless Service was created")
 			svc := &corev1.Service{}
@@ -191,15 +191,12 @@ var _ = Describe("HyperbytedbCluster Controller", func() {
 			Expect(cm.Data["config.toml"]).To(ContainSubstring("[cluster]"))
 			Expect(cm.Data["config.toml"]).To(ContainSubstring("enabled = true"))
 
-			By("verifying the peers ConfigMap has 3 entries")
+			By("verifying the peers ConfigMap is NOT created (membership is API-driven)")
 			peersCM := &corev1.ConfigMap{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{
+			err = k8sClient.Get(ctx, types.NamespacedName{
 				Name: resourceName + "-peers", Namespace: "default",
-			}, peersCM)).To(Succeed())
-			Expect(peersCM.Data).To(HaveKey("0"))
-			Expect(peersCM.Data).To(HaveKey("1"))
-			Expect(peersCM.Data).To(HaveKey("2"))
-			Expect(peersCM.Data["replicas"]).To(Equal("3"))
+			}, peersCM)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
 		})
 	})
 

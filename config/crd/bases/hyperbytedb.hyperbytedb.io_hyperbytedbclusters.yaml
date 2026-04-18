@@ -2961,6 +2961,19 @@ spec:
                 - enabled
                 - maxReplicas
                 type: object
+              cardinality:
+                description: CardinalitySpec configures cardinality limits enforced
+                  by hyperbytedb.
+                properties:
+                  maxMeasurementsPerDatabase:
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  maxTagValuesPerMeasurement:
+                    format: int64
+                    minimum: 0
+                    type: integer
+                type: object
               chdb:
                 properties:
                   poolSize:
@@ -2999,9 +3012,78 @@ spec:
                     default: 1000
                     format: int32
                     type: integer
+                  replicateReceiverQueueDepth:
+                    description: Bounded apply queue on the replicate receiver.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  replication:
+                    description: Per-node, per-write replication mode and tuning.
+                    properties:
+                      ackTimeoutMs:
+                        default: 5000
+                        description: |-
+                          Worst-case latency budget (ms) for sync_quorum writes. On timeout the
+                          coordinator returns 504; in-flight peer tasks keep running and unacked
+                          peers fall back to hinted handoff.
+                        format: int64
+                        minimum: 0
+                        type: integer
+                      mode:
+                        default: async
+                        description: |-
+                          Replication mode. "async" is fire-and-forget HTTP fan-out (default,
+                          preserves today's behavior). "sync_quorum" awaits W-of-N peer acks
+                          before returning to the client.
+                        enum:
+                        - async
+                        - sync_quorum
+                        type: string
+                      syncQuorum:
+                        description: SyncQuorumSpec configures the sync_quorum replication
+                          mode.
+                        properties:
+                          minAcks:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: |-
+                              Number of peer acks required for sync_quorum. Either the string
+                              "majority" (resolved at request time against current active peers) or an
+                              explicit integer count. The local WAL append always happens first, so
+                              self-durability is implicit and the local node is never counted toward
+                              the quorum.
+                            x-kubernetes-int-or-string: true
+                        type: object
+                    type: object
+                  replicationMaxCoalesceBodyBytes:
+                    description: Max bytes for coalescing consecutive WAL batches
+                      with the same db/rp/precision.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  replicationMaxInflightBatches:
+                    description: Max concurrent outbound replication fan-out rounds
+                      (token bucket).
+                    format: int32
+                    minimum: 0
+                    type: integer
                   replicationMaxRetries:
                     default: 5
                     format: int32
+                    type: integer
+                  replicationQueueDepth:
+                    description: Bounded outbound replication queue depth (ingest-sized
+                      batches).
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  replicationTruncateStalePeerMultiplier:
+                    description: |-
+                      When >0, peers with ack 0 and stale heartbeats (older than
+                      heartbeatIntervalSecs * multiplier) are omitted from the WAL truncate barrier.
+                    format: int64
+                    minimum: 0
                     type: integer
                   syncMaxConcurrentFiles:
                     default: 4
@@ -3037,6 +3119,21 @@ spec:
                 type: object
               compaction:
                 properties:
+                  bucketDuration:
+                    description: |-
+                      Compaction time bucket. "1h" (hourly, default) or "1d" (daily). Daily
+                      buckets merge all 24 hourly files, reducing file count for wide-range queries.
+                    enum:
+                    - 1h
+                    - 1d
+                    - 24h
+                    type: string
+                  compactAllMaxInflight:
+                    description: Max concurrent measurement compactions when running
+                      compact_all.
+                    format: int32
+                    minimum: 0
+                    type: integer
                   enabled:
                     default: true
                     type: boolean
@@ -3044,13 +3141,32 @@ spec:
                     default: 300
                     format: int32
                     type: integer
+                  maxRepairChecksPerCycle:
+                    description: |-
+                      Max bucket-hash comparisons (and repair attempts) per compaction tick for
+                      membership self-repair.
+                    format: int32
+                    minimum: 0
+                    type: integer
                   minFilesToCompact:
                     default: 4
                     format: int32
                     type: integer
+                  selfRepairEnabled:
+                    description: |-
+                      When true, periodically compare each active peer's manifest against local
+                      bucket hashes and fetch divergent or missing slices.
+                    type: boolean
                   targetFileSizeMb:
                     default: 256
                     format: int32
+                    type: integer
+                  verifiedCompactionAgeSecs:
+                    description: |-
+                      Minimum age (seconds) before per-node files are hash-verified and merged
+                      into a single compacted file.
+                    format: int64
+                    minimum: 0
                     type: integer
                 type: object
               failover:
@@ -3082,12 +3198,50 @@ spec:
                     default: 10
                     format: int32
                     type: integer
+                  maxPointsPerBatch:
+                    description: Maximum points buffered per measurement before forcing
+                      a flush. 0 = unlimited.
+                    format: int32
+                    minimum: 0
+                    type: integer
                   timeBucketDuration:
                     default: 1h
                     type: string
+                  walBatchDelayUs:
+                    description: 'WAL group-commit: max microseconds to wait for more
+                      entries before flushing.'
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  walBatchSize:
+                    description: 'WAL group-commit: max entries to coalesce per write
+                      batch. 0 = disabled.'
+                    format: int32
+                    minimum: 0
+                    type: integer
                   walSizeThresholdMb:
                     default: 64
                     format: int32
+                    type: integer
+                type: object
+              hintedHandoff:
+                description: |-
+                  HintedHandoffSpec configures the hinted-handoff queue used to retry writes
+                  against peers that were temporarily unreachable.
+                properties:
+                  enabled:
+                    type: boolean
+                  maxHintAgeSecs:
+                    description: Hints older than this (seconds) are discarded on
+                      drain.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  maxHintsPerPeer:
+                    description: Maximum queued hints per unreachable peer before
+                      oldest are dropped.
+                    format: int64
+                    minimum: 0
                     type: integer
                 type: object
               image:
@@ -3154,6 +3308,18 @@ spec:
               podLabels:
                 additionalProperties:
                   type: string
+                type: object
+              rateLimit:
+                description: RateLimitSpec controls per-endpoint request rate limiting.
+                properties:
+                  enabled:
+                    type: boolean
+                  maxRequestsPerSecond:
+                    description: Maximum requests per second per endpoint (/write,
+                      /query). 0 = unlimited.
+                    format: int64
+                    minimum: 0
+                    type: integer
                 type: object
               replicas:
                 default: 1
@@ -3225,6 +3391,11 @@ spec:
                     default: 26214400
                     format: int64
                     type: integer
+                  maxConcurrentQueries:
+                    description: Maximum concurrent /query requests. 0 = unlimited.
+                    format: int32
+                    minimum: 0
+                    type: integer
                   port:
                     default: 8086
                     format: int32
@@ -3265,6 +3436,21 @@ spec:
                     required:
                     - enabled
                     type: object
+                type: object
+              statementSummary:
+                description: |-
+                  StatementSummarySpec controls collection of per-statement execution stats
+                  exposed via /debug/statement_summary.
+                properties:
+                  enabled:
+                    type: boolean
+                  maxEntries:
+                    description: |-
+                      Maximum number of distinct statements tracked. Oldest entries are evicted
+                      when the limit is exceeded.
+                    format: int32
+                    minimum: 0
+                    type: integer
                 type: object
               storage:
                 properties:
