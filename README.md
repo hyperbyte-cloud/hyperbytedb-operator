@@ -6,25 +6,111 @@ Kubernetes operator for managing HyperbyteDB clusters, backups, and restores.
 
 - Kubernetes v1.26+
 - kubectl
-- Helm v3 (optional, for Helm-based installation)
+- Helm v3.8+ (required for OCI registry support)
 
-## Quick Start
+## Installation
 
-### Install with Helm
+The operator is published as both a container image and a Helm chart on
+GitHub Container Registry (GHCR / GitHub Packages):
+
+| Artifact          | Reference                                                              |
+| ----------------- | ---------------------------------------------------------------------- |
+| Operator image    | `ghcr.io/hyperbyte-cloud/hyperbytedb-operator`                         |
+| Helm chart (OCI)  | `oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator`            |
+
+Both artifacts are released together — installing chart version `X.Y.Z` will
+deploy the matching `vX.Y.Z` operator image by default.
+
+### Install the latest release
 
 ```sh
-helm install hyperbytedb-operator dist/chart \
+helm install hyperbytedb-operator \
+  oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator \
   --namespace hyperbytedb-operator-system \
   --create-namespace
 ```
 
-### Install with kubectl
+### Install a specific version
 
 ```sh
-kubectl apply -f https://raw.githubusercontent.com/hyperbyte-cloud/hyperbytedb-operator/main/dist/install.yaml
+helm install hyperbytedb-operator \
+  oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator \
+  --version 0.1.0 \
+  --namespace hyperbytedb-operator-system \
+  --create-namespace
 ```
 
-### Deploy a Cluster
+You can browse all published versions on the
+[hyperbytedb-operator packages page](https://github.com/orgs/hyperbyte-cloud/packages?repo_name=hyperbytedb-operator).
+
+### Snapshot / pre-release builds
+
+Every push to `main` publishes a snapshot chart and image tagged with the
+short commit SHA, e.g. `0.0.0-sha.abc1234`. To install one:
+
+```sh
+helm install hyperbytedb-operator \
+  oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator \
+  --version 0.0.0-sha.abc1234 \
+  --namespace hyperbytedb-operator-system \
+  --create-namespace
+```
+
+### Common configuration
+
+```sh
+helm install hyperbytedb-operator \
+  oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator \
+  --namespace hyperbytedb-operator-system \
+  --create-namespace \
+  --set manager.replicas=2 \
+  --set rbacHelpers.enable=true \
+  --set prometheus.enable=true
+```
+
+See [`dist/chart/values.yaml`](dist/chart/values.yaml) for the full list of
+configurable values.
+
+### Upgrade
+
+```sh
+helm upgrade hyperbytedb-operator \
+  oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator \
+  --version 0.2.0 \
+  --namespace hyperbytedb-operator-system \
+  --reuse-values
+```
+
+### Uninstall
+
+```sh
+helm uninstall hyperbytedb-operator --namespace hyperbytedb-operator-system
+```
+
+CRDs are retained on uninstall by default (`crd.keep=true`). To remove them
+explicitly:
+
+```sh
+kubectl delete crd \
+  hyperbytedbclusters.hyperbytedb.hyperbytedb.io \
+  hyperbytedbbackups.hyperbytedb.hyperbytedb.io \
+  hyperbytedbrestores.hyperbytedb.hyperbytedb.io
+```
+
+### Install from source (development)
+
+To install directly from a checkout of this repository, e.g. for local
+testing of un-released changes:
+
+```sh
+helm install hyperbytedb-operator dist/chart \
+  --namespace hyperbytedb-operator-system \
+  --create-namespace \
+  --set manager.image.repository=ghcr.io/hyperbyte-cloud/hyperbytedb-operator \
+  --set manager.image.tag=latest
+```
+
+## Deploy a Cluster
 
 ```yaml
 apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1

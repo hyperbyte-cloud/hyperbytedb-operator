@@ -3,6 +3,10 @@ name: hyperbytedb-operator
 description: Kubernetes operator for managing HyperbyteDB clusters, backups, and restores
 type: application
 
+# `version` and `appVersion` are placeholders for local development — the
+# release workflow (.github/workflows/release.yml) stamps them with the git
+# tag (or a `0.0.0-sha.<short>` snapshot for main branch builds) when the
+# chart is packaged and pushed to ghcr.io.
 version: 0.1.0
 appVersion: "0.1.0"
 
