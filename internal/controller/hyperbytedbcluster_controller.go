@@ -45,6 +45,10 @@ import (
 
 const clusterFinalizer = "hyperbytedb.hyperbytedb.io/finalizer"
 
+// replicationStateHealthy is the ReplicationState value reported when all
+// nodes are within tolerance of each other on parquet file count.
+const replicationStateHealthy = "Healthy"
+
 // HyperbytedbClusterReconciler reconciles a HyperbytedbCluster object.
 type HyperbytedbClusterReconciler struct {
 	client.Client
@@ -66,6 +70,9 @@ type HyperbytedbClusterReconciler struct {
 // +kubebuilder:rbac:groups=autoscaling,resources=horizontalpodautoscalers,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 
+// nolint:gocyclo // Reconcile orchestrates many sequential steps (finalizers, services,
+// configmap, scale-down hooks, statefulset, status, replication checks, auto-failover);
+// splitting it further would obscure the linear flow without reducing real complexity.
 func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -157,9 +164,8 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// 5b. Scale-down: drain departing pods and notify survivors before the StatefulSet shrinks.
-	if err := r.runScaleDownClusterHooks(ctx, cluster, prevSTSReplicas, replicas); err != nil {
-		log.Error(err, "Scale-down hooks failed")
-	}
+	// Errors per-pod are already logged inside the hook and intentionally non-fatal.
+	r.runScaleDownClusterHooks(ctx, cluster, prevSTSReplicas, replicas)
 
 	// 6. StatefulSet
 	stsResult, err := r.reconcileStatefulSet(ctx, cluster, configHash)
@@ -373,8 +379,8 @@ func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context,
 	existing.Spec.Template.Spec.Affinity = desired.Spec.Template.Spec.Affinity
 	existing.Spec.Template.Spec.Tolerations = desired.Spec.Template.Spec.Tolerations
 	existing.Spec.Template.Spec.TopologySpreadConstraints = desired.Spec.Template.Spec.TopologySpreadConstraints
-	existing.Spec.Template.ObjectMeta.Annotations = desired.Spec.Template.ObjectMeta.Annotations
-	existing.Spec.Template.ObjectMeta.Labels = desired.Spec.Template.ObjectMeta.Labels
+	existing.Spec.Template.Annotations = desired.Spec.Template.Annotations
+	existing.Spec.Template.Labels = desired.Spec.Template.Labels
 	existing.Spec.UpdateStrategy = desired.Spec.UpdateStrategy
 
 	if err := r.Update(ctx, existing); err != nil {
@@ -391,9 +397,11 @@ func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context,
 
 // runScaleDownClusterHooks drains pods that will be removed (highest ordinals first) and asks
 // surviving members to drop them from membership. Must run before .spec.replicas is reduced.
-func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, prevReplicas, desiredReplicas int32) error {
+// Per-pod failures are logged and ignored: the StatefulSet scale-down still proceeds because
+// the membership/drain endpoints are best-effort hints to surviving nodes.
+func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, prevReplicas, desiredReplicas int32) {
 	if desiredReplicas >= prevReplicas || prevReplicas < 1 {
-		return nil
+		return
 	}
 
 	log := logf.FromContext(ctx)
@@ -411,7 +419,7 @@ func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Cont
 
 	for i := desiredReplicas; i < prevReplicas; i++ {
 		departedID := uint64(i + 1)
-		for j := int32(0); j < desiredReplicas; j++ {
+		for j := range desiredReplicas {
 			survivor := fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local",
 				stsName, j, headlessSvc, cluster.Namespace)
 			if err := r.Members.Client.LeaveNode(ctx, survivor, port, departedID); err != nil {
@@ -420,8 +428,6 @@ func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Cont
 			}
 		}
 	}
-
-	return nil
 }
 
 // ---------- Auto-failover ----------
@@ -639,7 +645,7 @@ func (r *HyperbytedbClusterReconciler) verifyClusterTopology(ctx context.Context
 	}
 
 	var views []podView
-	for i := int32(0); i < replicas; i++ {
+	for i := range replicas {
 		host := fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local",
 			stsName, i, headlessSvc, cluster.Namespace)
 		nodes, err := r.Members.Client.GetClusterNodes(ctx, host, port)
@@ -669,7 +675,7 @@ func (r *HyperbytedbClusterReconciler) verifyClusterTopology(ctx context.Context
 
 	// Build map of known nodeIDs per view and detect missing nodes
 	allExpected := make(map[int32]string, replicas)
-	for i := int32(0); i < replicas; i++ {
+	for i := range replicas {
 		allExpected[i+1] = fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local:%d",
 			stsName, i, headlessSvc, cluster.Namespace, port)
 	}
@@ -773,7 +779,7 @@ func (r *HyperbytedbClusterReconciler) monitorReplicationHealth(ctx context.Cont
 	}
 
 	var manifests []nodeManifest
-	for i := int32(0); i < replicas; i++ {
+	for i := range replicas {
 		host := fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local",
 			stsName, i, headlessSvc, cluster.Namespace)
 		manifest, err := r.Members.Client.GetSyncManifest(ctx, host, port)
@@ -823,7 +829,7 @@ func (r *HyperbytedbClusterReconciler) monitorReplicationHealth(ctx context.Cont
 		}
 	}
 
-	replState := "Healthy"
+	replState := replicationStateHealthy
 	reason := "InSync"
 	if maxFiles > 0 && minFiles < maxFiles/2 {
 		replState = "Diverged"
@@ -836,7 +842,7 @@ func (r *HyperbytedbClusterReconciler) monitorReplicationHealth(ctx context.Cont
 	cluster.Status.ReplicationState = replState
 
 	condStatus := metav1.ConditionTrue
-	if replState != "Healthy" {
+	if replState != replicationStateHealthy {
 		condStatus = metav1.ConditionFalse
 	}
 
@@ -848,7 +854,7 @@ func (r *HyperbytedbClusterReconciler) monitorReplicationHealth(ctx context.Cont
 		LastTransitionTime: metav1.Now(),
 	})
 
-	if replState != "Healthy" {
+	if replState != replicationStateHealthy {
 		log.Info("Replication divergence detected",
 			"state", replState, "minFiles", minFiles, "maxFiles", maxFiles)
 	}

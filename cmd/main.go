@@ -186,10 +186,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// NOTE: GetEventRecorderFor is marked deprecated in favour of GetEventRecorder, but the
+	// replacement returns the newer events.EventRecorder interface which is incompatible with
+	// our controllers (they use the record.EventRecorder API). Migrating requires reworking
+	// every Recorder.Event/Eventf call site, so until that refactor we silence the warning,
+	// matching controller-runtime's own internal usage.
 	if err := (&controller.HyperbytedbClusterReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("hyperbytedbcluster-controller"),
+		Recorder: mgr.GetEventRecorderFor("hyperbytedbcluster-controller"), //nolint:staticcheck // see comment above
 		Members:  hyperbytedb.NewMemberManager(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "HyperbytedbCluster")
@@ -198,7 +203,7 @@ func main() {
 	if err := (&controller.HyperbytedbBackupReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("hyperbytedbbackup-controller"),
+		Recorder: mgr.GetEventRecorderFor("hyperbytedbbackup-controller"), //nolint:staticcheck // see comment above
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "HyperbytedbBackup")
 		os.Exit(1)
@@ -206,7 +211,7 @@ func main() {
 	if err := (&controller.HyperbytedbRestoreReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
-		Recorder: mgr.GetEventRecorderFor("hyperbytedbrestore-controller"),
+		Recorder: mgr.GetEventRecorderFor("hyperbytedbrestore-controller"), //nolint:staticcheck // see comment above
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "HyperbytedbRestore")
 		os.Exit(1)

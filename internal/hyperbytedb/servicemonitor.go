@@ -19,19 +19,19 @@ func BuildServiceMonitor(cluster *v1alpha1.HyperbytedbCluster) *unstructured.Uns
 	sm.SetNamespace(cluster.Namespace)
 	sm.SetLabels(labels)
 
-	sm.Object["spec"] = map[string]interface{}{
-		"selector": map[string]interface{}{
+	sm.Object["spec"] = map[string]any{
+		"selector": map[string]any{
 			"matchLabels": convertLabels(labels),
 		},
-		"endpoints": []interface{}{
-			map[string]interface{}{
+		"endpoints": []any{
+			map[string]any{
 				"port":     "http",
 				"path":     "/metrics",
 				"interval": "15s",
 			},
 		},
-		"namespaceSelector": map[string]interface{}{
-			"matchNames": []interface{}{cluster.Namespace},
+		"namespaceSelector": map[string]any{
+			"matchNames": []any{cluster.Namespace},
 		},
 	}
 
@@ -47,8 +47,8 @@ func ServiceMonitorGVR() metav1.GroupVersionResource {
 	}
 }
 
-func convertLabels(labels map[string]string) map[string]interface{} {
-	result := make(map[string]interface{}, len(labels))
+func convertLabels(labels map[string]string) map[string]any {
+	result := make(map[string]any, len(labels))
 	for k, v := range labels {
 		result[k] = v
 	}

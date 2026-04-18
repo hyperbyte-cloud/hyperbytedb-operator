@@ -60,7 +60,7 @@ func (c *Client) GetClusterMetrics(ctx context.Context, host string, port int32)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("cluster/metrics returned %d: %s", resp.StatusCode, string(respBody))
@@ -83,7 +83,7 @@ func (c *Client) GetClusterNodes(ctx context.Context, host string, port int32) (
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("cluster/nodes returned %d: %s", resp.StatusCode, string(respBody))
@@ -107,7 +107,7 @@ func (c *Client) DrainNode(ctx context.Context, host string, port int32) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("drain returned %d: %s", resp.StatusCode, string(respBody))
@@ -126,7 +126,7 @@ func (c *Client) GetNodeHealth(ctx context.Context, host string, port int32) (*H
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -162,7 +162,7 @@ func (c *Client) CheckHealth(ctx context.Context, host string, port int32) error
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("health check returned %d", resp.StatusCode)
 	}
@@ -222,7 +222,7 @@ func (c *Client) GetSyncManifest(ctx context.Context, host string, port int32) (
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("sync/manifest returned %d: %s", resp.StatusCode, string(respBody))
@@ -257,7 +257,7 @@ func (c *Client) JoinNode(ctx context.Context, host string, port int32, nodeID i
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("membership/join returned %d: %s", resp.StatusCode, string(respBody))
@@ -287,7 +287,7 @@ func (c *Client) LeaveNode(ctx context.Context, host string, port int32, departe
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
 		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("membership/leave returned %d: %s", resp.StatusCode, string(respBody))

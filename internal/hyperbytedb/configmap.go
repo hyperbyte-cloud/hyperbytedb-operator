@@ -52,7 +52,7 @@ func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, cl
 	var b strings.Builder
 
 	b.WriteString("[server]\n")
-	b.WriteString(fmt.Sprintf("bind_address = \"0.0.0.0\"\n"))
+	b.WriteString("bind_address = \"0.0.0.0\"\n")
 	port := int32(8086)
 	if spec.Server.Port > 0 {
 		port = spec.Server.Port
@@ -76,9 +76,9 @@ func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, cl
 	}
 
 	b.WriteString("\n[storage]\n")
-	b.WriteString(fmt.Sprintf("data_dir = \"/var/lib/hyperbytedb/data\"\n"))
-	b.WriteString(fmt.Sprintf("wal_dir = \"/var/lib/hyperbytedb/wal\"\n"))
-	b.WriteString(fmt.Sprintf("meta_dir = \"/var/lib/hyperbytedb/meta\"\n"))
+	b.WriteString("data_dir = \"/var/lib/hyperbytedb/data\"\n")
+	b.WriteString("wal_dir = \"/var/lib/hyperbytedb/wal\"\n")
+	b.WriteString("meta_dir = \"/var/lib/hyperbytedb/meta\"\n")
 	backend := "local"
 	if spec.Storage.Backend != "" {
 		backend = spec.Storage.Backend
@@ -139,7 +139,7 @@ func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, cl
 	b.WriteString(fmt.Sprintf("target_file_size_mb = %d\n", targetSize))
 
 	b.WriteString("\n[chdb]\n")
-	b.WriteString(fmt.Sprintf("session_data_path = \"/var/lib/hyperbytedb/chdb\"\n"))
+	b.WriteString("session_data_path = \"/var/lib/hyperbytedb/chdb\"\n")
 	poolSize := int32(4)
 	if spec.ChDB.PoolSize > 0 {
 		poolSize = spec.ChDB.PoolSize
@@ -168,60 +168,60 @@ func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, cl
 
 func writeClusterSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec, clusterEnabled bool) {
 	b.WriteString("\n[cluster]\n")
-	b.WriteString(fmt.Sprintf("enabled = %t\n", clusterEnabled))
+	fmt.Fprintf(b, "enabled = %t\n", clusterEnabled)
 	b.WriteString("replication_log_dir = \"/var/lib/hyperbytedb/replication_log\"\n")
 
 	heartbeatInterval := int32(2)
 	if spec.Cluster.HeartbeatIntervalSecs > 0 {
 		heartbeatInterval = spec.Cluster.HeartbeatIntervalSecs
 	}
-	b.WriteString(fmt.Sprintf("heartbeat_interval_secs = %d\n", heartbeatInterval))
+	fmt.Fprintf(b, "heartbeat_interval_secs = %d\n", heartbeatInterval)
 
 	heartbeatMiss := int32(5)
 	if spec.Cluster.HeartbeatMissThreshold > 0 {
 		heartbeatMiss = spec.Cluster.HeartbeatMissThreshold
 	}
-	b.WriteString(fmt.Sprintf("heartbeat_miss_threshold = %d\n", heartbeatMiss))
+	fmt.Fprintf(b, "heartbeat_miss_threshold = %d\n", heartbeatMiss)
 
 	aeEnabled := true
 	if spec.Cluster.AntiEntropyEnabled != nil {
 		aeEnabled = *spec.Cluster.AntiEntropyEnabled
 	}
-	b.WriteString(fmt.Sprintf("anti_entropy_enabled = %t\n", aeEnabled))
+	fmt.Fprintf(b, "anti_entropy_enabled = %t\n", aeEnabled)
 
 	aeInterval := int32(60)
 	if spec.Cluster.AntiEntropyIntervalSecs > 0 {
 		aeInterval = spec.Cluster.AntiEntropyIntervalSecs
 	}
-	b.WriteString(fmt.Sprintf("anti_entropy_interval_secs = %d\n", aeInterval))
+	fmt.Fprintf(b, "anti_entropy_interval_secs = %d\n", aeInterval)
 
 	syncFiles := int32(4)
 	if spec.Cluster.SyncMaxConcurrentFiles > 0 {
 		syncFiles = spec.Cluster.SyncMaxConcurrentFiles
 	}
-	b.WriteString(fmt.Sprintf("sync_max_concurrent_files = %d\n", syncFiles))
+	fmt.Fprintf(b, "sync_max_concurrent_files = %d\n", syncFiles)
 
 	replRetries := int32(5)
 	if spec.Cluster.ReplicationMaxRetries > 0 {
 		replRetries = spec.Cluster.ReplicationMaxRetries
 	}
-	b.WriteString(fmt.Sprintf("replication_max_retries = %d\n", replRetries))
+	fmt.Fprintf(b, "replication_max_retries = %d\n", replRetries)
 
 	raftHB := int32(300)
 	if spec.Cluster.RaftHeartbeatIntervalMs > 0 {
 		raftHB = spec.Cluster.RaftHeartbeatIntervalMs
 	}
-	b.WriteString(fmt.Sprintf("raft_heartbeat_interval_ms = %d\n", raftHB))
+	fmt.Fprintf(b, "raft_heartbeat_interval_ms = %d\n", raftHB)
 
 	raftElection := int32(1000)
 	if spec.Cluster.RaftElectionTimeoutMs > 0 {
 		raftElection = spec.Cluster.RaftElectionTimeoutMs
 	}
-	b.WriteString(fmt.Sprintf("raft_election_timeout_ms = %d\n", raftElection))
+	fmt.Fprintf(b, "raft_election_timeout_ms = %d\n", raftElection)
 
 	raftSnapshot := int32(1000)
 	if spec.Cluster.RaftSnapshotThreshold > 0 {
 		raftSnapshot = spec.Cluster.RaftSnapshotThreshold
 	}
-	b.WriteString(fmt.Sprintf("raft_snapshot_threshold = %d\n", raftSnapshot))
+	fmt.Fprintf(b, "raft_snapshot_threshold = %d\n", raftSnapshot)
 }

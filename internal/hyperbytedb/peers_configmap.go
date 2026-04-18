@@ -28,7 +28,7 @@ func BuildPeersConfigMap(cluster *v1alpha1.HyperbytedbCluster, namespace string,
 	headlessSvc := HeadlessServiceName(cluster)
 
 	data := make(map[string]string)
-	for i := int32(0); i < replicas; i++ {
+	for i := range replicas {
 		fqdn := fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local:%d",
 			stsName, i, headlessSvc, namespace, port)
 		data[fmt.Sprintf("%d", i)] = fqdn

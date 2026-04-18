@@ -2,6 +2,7 @@ package hyperbytedb
 
 import (
 	"fmt"
+	"maps"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -297,17 +298,11 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 
 	// --------------- pod template labels & annotations ---------------
 	podLabels := make(map[string]string)
-	for k, v := range CommonLabels(cluster) {
-		podLabels[k] = v
-	}
-	for k, v := range cluster.Spec.PodLabels {
-		podLabels[k] = v
-	}
+	maps.Copy(podLabels, CommonLabels(cluster))
+	maps.Copy(podLabels, cluster.Spec.PodLabels)
 
 	podAnnotations := make(map[string]string)
-	for k, v := range cluster.Spec.PodAnnotations {
-		podAnnotations[k] = v
-	}
+	maps.Copy(podAnnotations, cluster.Spec.PodAnnotations)
 	if configHash != "" {
 		podAnnotations["hyperbytedb.hyperbytedb.io/config-hash"] = configHash
 	}

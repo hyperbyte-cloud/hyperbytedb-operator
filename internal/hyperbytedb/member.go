@@ -37,7 +37,7 @@ func (m *MemberManager) CollectMemberStatuses(
 
 	members := make([]v1alpha1.MemberStatus, 0, replicas)
 
-	for i := int32(0); i < replicas; i++ {
+	for i := range replicas {
 		podName := fmt.Sprintf("%s-%d", stsName, i)
 		host := fmt.Sprintf("%s.%s.%s.svc.cluster.local",
 			podName, headlessSvc, namespace)

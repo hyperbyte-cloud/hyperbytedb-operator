@@ -35,13 +35,14 @@ func BuildSelfSignedTLSSecret(
 	stsName := StatefulSetName(cluster)
 	headlessSvc := HeadlessServiceName(cluster)
 
-	// SAN DNS names
-	dnsNames := []string{
+	// SAN DNS names: 3 fixed wildcard/service entries plus one per pod ordinal.
+	dnsNames := make([]string, 0, 3+replicas)
+	dnsNames = append(dnsNames,
 		fmt.Sprintf("*.%s.%s.svc.cluster.local", headlessSvc, namespace),
 		fmt.Sprintf("%s.%s.svc.cluster.local", headlessSvc, namespace),
 		fmt.Sprintf("%s.%s.svc.cluster.local", ClientServiceName(cluster), namespace),
-	}
-	for i := int32(0); i < replicas; i++ {
+	)
+	for i := range replicas {
 		dnsNames = append(dnsNames,
 			fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local", stsName, i, headlessSvc, namespace))
 	}
