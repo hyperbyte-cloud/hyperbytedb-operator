@@ -65,17 +65,48 @@ jobs:
           echo "Detected network: $NETWORK"
           echo "KIND_EXPERIMENTAL_DOCKER_NETWORK=$NETWORK" >> "$GITHUB_ENV"
 
-      # Only remove clusters that belong to this workflow (or the default
-      # `kind` cluster left over from earlier ad-hoc runs) so we do not
-      # interfere with concurrent jobs (e.g. e2e tests).
+      # Reap obviously-stale kind clusters left behind by previous runs while
+      # leaving anything from a *concurrent* run untouched. Deleting another
+      # in-flight job's cluster races with its kubectl/helm calls and
+      # produces `dial tcp: lookup <cluster>-control-plane: no such host`
+      # failures mid-run.
+      #
+      # Rules:
+      #   * The default "kind" cluster is always safe to remove.
+      #   * Anything matching our run-scoped prefix (hyperbytedb-chart-*)
+      #     only gets removed if its control-plane container is older than
+      #     STALE_AFTER_SECONDS or the container is gone entirely (orphaned
+      #     kind metadata).
       - name: Cleanup leftover chart kind clusters
+        env:
+          STALE_AFTER_SECONDS: "21600" # 6h
         run: |
+          set -eu
+          NOW=$(date -u +%s)
           for cluster in $(kind get clusters 2>/dev/null || true); do
             case "$cluster" in
-              kind|hyperbytedb-chart-*)
-                if [ "$cluster" != "$KIND_CLUSTER_NAME" ]; then
-                  echo "Deleting leftover kind cluster: $cluster"
+              kind)
+                echo "Deleting default kind cluster: $cluster"
+                kind delete cluster --name "$cluster" || true
+                ;;
+              hyperbytedb-chart-*)
+                if [ "$cluster" = "$KIND_CLUSTER_NAME" ]; then
+                  continue
+                fi
+                started_at=$(docker inspect "${cluster}-control-plane" \
+                  --format '{{.State.StartedAt}}' 2>/dev/null || true)
+                if [ -z "$started_at" ]; then
+                  echo "Deleting orphaned kind cluster (no control-plane container): $cluster"
                   kind delete cluster --name "$cluster" || true
+                  continue
+                fi
+                started_epoch=$(date -u -d "$started_at" +%s 2>/dev/null || echo 0)
+                age=$((NOW - started_epoch))
+                if [ "$age" -gt "$STALE_AFTER_SECONDS" ]; then
+                  echo "Deleting stale kind cluster (age=${age}s > ${STALE_AFTER_SECONDS}s): $cluster"
+                  kind delete cluster --name "$cluster" || true
+                else
+                  echo "Skipping recent kind cluster (age=${age}s, likely concurrent run): $cluster"
                 fi
                 ;;
               *)
