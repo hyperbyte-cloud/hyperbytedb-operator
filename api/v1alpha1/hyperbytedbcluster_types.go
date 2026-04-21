@@ -94,6 +94,12 @@ type HyperbytedbClusterSpec struct {
 	// +optional
 	Failover *FailoverSpec `json:"failover,omitempty"`
 
+	// Proxy deploys a stateless `hyperbytedb-proxy` Deployment in front of the
+	// StatefulSet to absorb rolling restarts and drain events without
+	// returning errors to clients.
+	// +optional
+	Proxy *ProxySpec `json:"proxy,omitempty"`
+
 	// +optional
 	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
 
@@ -468,6 +474,93 @@ type FailoverSpec struct {
 	// +kubebuilder:default=300
 	// +kubebuilder:validation:Minimum=60
 	FailoverTimeoutSecs int32 `json:"failoverTimeoutSecs,omitempty"`
+}
+
+// ProxySpec configures the optional `hyperbytedb-proxy` reverse proxy that
+// sits in front of the StatefulSet. The proxy is health-aware: it routes
+// only to Active backends and holds requests briefly while a rolling
+// restart cycles through pods, so clients (Grafana, Telegraf, etc.) never
+// observe transient 503s.
+type ProxySpec struct {
+	// When false, the operator does not create or reconcile any proxy
+	// resources. Existing proxy Deployment/Service (if any) are left alone
+	// so they can be cleaned up out-of-band.
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled"`
+
+	// +kubebuilder:default="hyperbytedb-proxy:latest"
+	Image string `json:"image,omitempty"`
+
+	// +optional
+	ImagePullPolicy corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
+
+	// +optional
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+
+	// +kubebuilder:default=2
+	// +kubebuilder:validation:Minimum=1
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// Port the proxy Service exposes. Defaults to the cluster server port so
+	// existing clients can re-target the Service name with no port change.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port,omitempty"`
+
+	// HTTP path used for backend health probes. Defaults to `/health`.
+	// Set to `/health/ready` for the deeper chDB-aware readiness check.
+	// +optional
+	HealthPath string `json:"healthPath,omitempty"`
+
+	// How long the proxy waits for a backend to come back before failing a
+	// request with 503. Bigger values mean rolling restarts are smoother but
+	// individual stuck requests sit longer.
+	// +optional
+	// +kubebuilder:default=10
+	// +kubebuilder:validation:Minimum=0
+	HoldTimeoutSecs int32 `json:"holdTimeoutSecs,omitempty"`
+
+	// Cap on per-backend retries for one request. 0 disables retries.
+	// +optional
+	// +kubebuilder:default=2
+	// +kubebuilder:validation:Minimum=0
+	MaxRetries int32 `json:"maxRetries,omitempty"`
+
+	// How long the proxy keeps serving in-flight requests after SIGTERM
+	// before exiting. Should comfortably exceed the longest expected query.
+	// +optional
+	// +kubebuilder:default=30
+	// +kubebuilder:validation:Minimum=1
+	ShutdownGraceSecs int32 `json:"shutdownGraceSecs,omitempty"`
+
+	// Per-request budget the proxy allows for the upstream call. Defaults
+	// to ~ServerSpec.RequestTimeoutSecs.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	RequestTimeoutSecs int32 `json:"requestTimeoutSecs,omitempty"`
+
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Type of the proxy Service. Defaults to ClusterIP. Set NodePort/
+	// LoadBalancer to expose externally.
+	// +optional
+	// +kubebuilder:validation:Enum=ClusterIP;NodePort;LoadBalancer
+	ServiceType corev1.ServiceType `json:"serviceType,omitempty"`
+
+	// Explicit nodePort when ServiceType=NodePort. Required for kind clusters
+	// that pre-map a host port to a fixed nodePort.
+	// +optional
+	// +kubebuilder:validation:Minimum=30000
+	// +kubebuilder:validation:Maximum=32767
+	NodePort int32 `json:"nodePort,omitempty"`
+
+	// +optional
+	PodAnnotations map[string]string `json:"podAnnotations,omitempty"`
+
+	// +optional
+	PodLabels map[string]string `json:"podLabels,omitempty"`
 }
 
 // ClusterPhase represents the lifecycle phase of the cluster.
