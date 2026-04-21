@@ -60,6 +60,7 @@ type HyperbytedbClusterReconciler struct {
 // +kubebuilder:rbac:groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbclusters/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
@@ -209,6 +210,15 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// 11. HPA
 	if err := r.reconcileHPA(ctx, cluster); err != nil {
 		log.Error(err, "Failed to reconcile HPA")
+	}
+
+	// 11b. Proxy (optional). When disabled (default) we don't reconcile —
+	// any pre-existing proxy resources are left intact so users can clean
+	// them up out-of-band.
+	if hyperbytedb.ProxyEnabled(cluster) {
+		if err := r.reconcileProxy(ctx, cluster); err != nil {
+			log.Error(err, "Failed to reconcile proxy")
+		}
 	}
 
 	// 12. Collect member statuses
@@ -624,6 +634,84 @@ func (r *HyperbytedbClusterReconciler) reconcileHPA(ctx context.Context, cluster
 
 	existing.Spec = desired.Spec
 	return r.Update(ctx, existing)
+}
+
+// ---------- Proxy ----------
+
+// reconcileProxy creates/updates the optional `hyperbytedb-proxy` Deployment
+// + Service that fronts the StatefulSet. Only invoked when
+// spec.proxy.enabled is true. The proxy itself discovers backend pods via
+// the existing headless Service, so this reconciler does not need to wire
+// peer addresses explicitly.
+func (r *HyperbytedbClusterReconciler) reconcileProxy(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster) error {
+	desiredSvc := hyperbytedb.BuildProxyService(cluster)
+	if err := controllerutil.SetControllerReference(cluster, desiredSvc, r.Scheme); err != nil {
+		return err
+	}
+	existingSvc := &corev1.Service{}
+	err := r.Get(ctx, types.NamespacedName{Name: desiredSvc.Name, Namespace: desiredSvc.Namespace}, existingSvc)
+	switch {
+	case apierrors.IsNotFound(err):
+		if err := r.Create(ctx, desiredSvc); err != nil {
+			return fmt.Errorf("create proxy service: %w", err)
+		}
+	case err != nil:
+		return fmt.Errorf("get proxy service: %w", err)
+	default:
+		// Type changes (e.g. ClusterIP↔NodePort) require recreating the Service;
+		// we only patch in-place when type matches to avoid unnecessary churn.
+		existingSvc.Spec.Ports = desiredSvc.Spec.Ports
+		existingSvc.Spec.Selector = desiredSvc.Spec.Selector
+		if existingSvc.Spec.Type == desiredSvc.Spec.Type {
+			if err := r.Update(ctx, existingSvc); err != nil {
+				return fmt.Errorf("update proxy service: %w", err)
+			}
+		} else {
+			if err := r.Delete(ctx, existingSvc); err != nil {
+				return fmt.Errorf("delete proxy service for type change: %w", err)
+			}
+			if err := r.Create(ctx, desiredSvc); err != nil {
+				return fmt.Errorf("recreate proxy service: %w", err)
+			}
+		}
+	}
+
+	desiredDep := hyperbytedb.BuildProxyDeployment(cluster)
+	if err := controllerutil.SetControllerReference(cluster, desiredDep, r.Scheme); err != nil {
+		return err
+	}
+	existingDep := &appsv1.Deployment{}
+	err = r.Get(ctx, types.NamespacedName{Name: desiredDep.Name, Namespace: desiredDep.Namespace}, existingDep)
+	if apierrors.IsNotFound(err) {
+		r.Recorder.Event(cluster, corev1.EventTypeNormal, "CreatingProxy", "Creating hyperbytedb-proxy Deployment")
+		return r.Create(ctx, desiredDep)
+	}
+	if err != nil {
+		return fmt.Errorf("get proxy deployment: %w", err)
+	}
+
+	// Preserve template-level annotations set by external tooling (most
+	// notably `kubectl.kubernetes.io/restartedAt`, which `kubectl rollout
+	// restart` writes to force a new ReplicaSet). Without this merge our
+	// next reconcile would overwrite Spec.Template wholesale, drop that
+	// annotation, and the Deployment would scale the new ReplicaSet back
+	// to zero — silently undoing the rollout.
+	mergedTemplateAnnotations := map[string]string{}
+	for k, v := range existingDep.Spec.Template.Annotations {
+		mergedTemplateAnnotations[k] = v
+	}
+	for k, v := range desiredDep.Spec.Template.Annotations {
+		mergedTemplateAnnotations[k] = v
+	}
+	if len(mergedTemplateAnnotations) > 0 {
+		desiredDep.Spec.Template.Annotations = mergedTemplateAnnotations
+	}
+
+	existingDep.Spec.Replicas = desiredDep.Spec.Replicas
+	existingDep.Spec.Selector = desiredDep.Spec.Selector
+	existingDep.Spec.Strategy = desiredDep.Spec.Strategy
+	existingDep.Spec.Template = desiredDep.Spec.Template
+	return r.Update(ctx, existingDep)
 }
 
 // ---------- Cluster Membership Reconciliation (API-driven) ----------

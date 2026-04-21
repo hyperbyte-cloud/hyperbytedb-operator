@@ -3309,6 +3309,181 @@ spec:
                 additionalProperties:
                   type: string
                 type: object
+              proxy:
+                description: |-
+                  Proxy deploys a stateless `hyperbytedb-proxy` Deployment in front of the
+                  StatefulSet to absorb rolling restarts and drain events without
+                  returning errors to clients.
+                properties:
+                  enabled:
+                    default: false
+                    description: |-
+                      When false, the operator does not create or reconcile any proxy
+                      resources. Existing proxy Deployment/Service (if any) are left alone
+                      so they can be cleaned up out-of-band.
+                    type: boolean
+                  healthPath:
+                    description: |-
+                      HTTP path used for backend health probes. Defaults to `/health`.
+                      Set to `/health/ready` for the deeper chDB-aware readiness check.
+                    type: string
+                  holdTimeoutSecs:
+                    default: 10
+                    description: |-
+                      How long the proxy waits for a backend to come back before failing a
+                      request with 503. Bigger values mean rolling restarts are smoother but
+                      individual stuck requests sit longer.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  image:
+                    default: hyperbytedb-proxy:latest
+                    type: string
+                  imagePullPolicy:
+                    description: PullPolicy describes a policy for if/when to pull
+                      a container image
+                    type: string
+                  imagePullSecrets:
+                    items:
+                      description: |-
+                        LocalObjectReference contains enough information to let you locate the
+                        referenced object inside the same namespace.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    type: array
+                  maxRetries:
+                    default: 2
+                    description: Cap on per-backend retries for one request. 0 disables
+                      retries.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  nodePort:
+                    description: |-
+                      Explicit nodePort when ServiceType=NodePort. Required for kind clusters
+                      that pre-map a host port to a fixed nodePort.
+                    format: int32
+                    maximum: 32767
+                    minimum: 30000
+                    type: integer
+                  podAnnotations:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  podLabels:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  port:
+                    description: |-
+                      Port the proxy Service exposes. Defaults to the cluster server port so
+                      existing clients can re-target the Service name with no port change.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                  replicas:
+                    default: 2
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  requestTimeoutSecs:
+                    description: |-
+                      Per-request budget the proxy allows for the upstream call. Defaults
+                      to ~ServerSpec.RequestTimeoutSecs.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  resources:
+                    description: ResourceRequirements describes the compute resource
+                      requirements.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  serviceType:
+                    description: |-
+                      Type of the proxy Service. Defaults to ClusterIP. Set NodePort/
+                      LoadBalancer to expose externally.
+                    enum:
+                    - ClusterIP
+                    - NodePort
+                    - LoadBalancer
+                    type: string
+                  shutdownGraceSecs:
+                    default: 30
+                    description: |-
+                      How long the proxy keeps serving in-flight requests after SIGTERM
+                      before exiting. Should comfortably exceed the longest expected query.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                required:
+                - enabled
+                type: object
               rateLimit:
                 description: RateLimitSpec controls per-endpoint request rate limiting.
                 properties:
