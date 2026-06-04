@@ -135,6 +135,9 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		{Name: "HYPERBYTEDB__STORAGE__META_DIR", Value: "/var/lib/hyperbytedb/meta"},
 		{Name: "HYPERBYTEDB__CHDB__SESSION_DATA_PATH", Value: "/var/lib/hyperbytedb/chdb"},
 	}
+	if cluster.Spec.Logging.OtlpEndpoint != "" {
+		env = append(env, corev1.EnvVar{Name: "OTEL_SERVICE_NAME", Value: cluster.Name})
+	}
 
 	// Cluster mode and paths come from mounted config.toml (hot-updated on scale);
 	// avoid replica-dependent env vars so the pod template stays stable across scale events.

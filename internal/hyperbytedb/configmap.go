@@ -42,11 +42,25 @@ func ConfigHash(cluster *v1alpha1.HyperbytedbCluster) string {
 }
 
 func renderConfigTOML(cluster *v1alpha1.HyperbytedbCluster) string {
+	return renderConfigTOMLWithClusterEnabled(cluster, clusterMetadataEnabled(cluster))
+}
+
+func clusterMetadataEnabled(cluster *v1alpha1.HyperbytedbCluster) bool {
 	replicas := int32(1)
 	if cluster.Spec.Replicas != nil {
 		replicas = *cluster.Spec.Replicas
 	}
-	return renderConfigTOMLWithClusterEnabled(cluster, replicas > 1)
+	return replicas > 1
+}
+
+func walReplicationEnabled(cluster *v1alpha1.HyperbytedbCluster) bool {
+	if cluster.Spec.Cluster.WalReplicationEnabled != nil {
+		return *cluster.Spec.Cluster.WalReplicationEnabled
+	}
+	if resolvedBackend(&cluster.Spec) == "clickhouse_remote" {
+		return false
+	}
+	return true
 }
 
 func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, clusterEnabled bool) string {
@@ -64,7 +78,7 @@ func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, cl
 	writeStatementSummarySection(&b, spec)
 	writeHintedHandoffSection(&b, spec)
 	writeRateLimitSection(&b, spec)
-	writeClusterSection(&b, spec, clusterEnabled)
+	writeClusterSection(&b, cluster, clusterEnabled)
 
 	return b.String()
 }
@@ -142,9 +156,11 @@ func writeFlushSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec
 		timeBucket = spec.Flush.TimeBucketDuration
 	}
 	fmt.Fprintf(b, "time_bucket_duration = \"%s\"\n", timeBucket)
+	maxPointsPerBatch := int32(50000)
 	if spec.Flush.MaxPointsPerBatch > 0 {
-		fmt.Fprintf(b, "max_points_per_batch = %d\n", spec.Flush.MaxPointsPerBatch)
+		maxPointsPerBatch = spec.Flush.MaxPointsPerBatch
 	}
+	fmt.Fprintf(b, "max_points_per_batch = %d\n", maxPointsPerBatch)
 	if spec.Flush.WALBatchSize > 0 {
 		fmt.Fprintf(b, "wal_batch_size = %d\n", spec.Flush.WALBatchSize)
 	}
@@ -232,6 +248,15 @@ func writeLoggingSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSp
 		format = spec.Logging.Format
 	}
 	fmt.Fprintf(b, "format = \"%s\"\n", format)
+	if spec.Logging.DetailedTrace != nil {
+		fmt.Fprintf(b, "detailed_trace = %t\n", *spec.Logging.DetailedTrace)
+	}
+	if spec.Logging.OtlpEndpoint != "" {
+		fmt.Fprintf(b, "otlp_endpoint = \"%s\"\n", spec.Logging.OtlpEndpoint)
+	}
+	if spec.Logging.OtlpSampleRatio != "" {
+		fmt.Fprintf(b, "otlp_sample_ratio = %s\n", spec.Logging.OtlpSampleRatio)
+	}
 }
 
 func writeStatementSummarySection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
@@ -276,9 +301,11 @@ func writeRateLimitSection(b *strings.Builder, spec *v1alpha1.HyperbytedbCluster
 	}
 }
 
-func writeClusterSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec, clusterEnabled bool) {
+func writeClusterSection(b *strings.Builder, cluster *v1alpha1.HyperbytedbCluster, clusterEnabled bool) {
+	spec := &cluster.Spec
 	b.WriteString("\n[cluster]\n")
 	fmt.Fprintf(b, "enabled = %t\n", clusterEnabled)
+	fmt.Fprintf(b, "wal_replication_enabled = %t\n", walReplicationEnabled(cluster))
 	b.WriteString("replication_log_dir = \"/var/lib/hyperbytedb/replication_log\"\n")
 
 	heartbeatInterval := int32(2)

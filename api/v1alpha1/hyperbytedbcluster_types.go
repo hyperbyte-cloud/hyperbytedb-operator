@@ -206,7 +206,8 @@ type FlushSpec struct {
 	// +kubebuilder:default="1h"
 	TimeBucketDuration string `json:"timeBucketDuration,omitempty"`
 
-	// Maximum points buffered per measurement before forcing a flush. 0 = unlimited.
+	// Max points per chDB insert batch (clamped server-side to 10k–500k).
+	// +kubebuilder:default=50000
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	MaxPointsPerBatch int32 `json:"maxPointsPerBatch,omitempty"`
@@ -286,6 +287,18 @@ type LoggingSpec struct {
 	// +kubebuilder:default="text"
 	// +kubebuilder:validation:Enum=text;json
 	Format string `json:"format,omitempty"`
+
+	// Emit per-phase performance logs (write/query/flush). Off by default.
+	// +optional
+	DetailedTrace *bool `json:"detailedTrace,omitempty"`
+
+	// OTLP HTTP endpoint for trace export (e.g. http://alloy-logs:4318).
+	// +optional
+	OtlpEndpoint string `json:"otlpEndpoint,omitempty"`
+
+	// Fraction of traces exported to OTLP (0.0–1.0). Default 1.0 when OTLP is set.
+	// +optional
+	OtlpSampleRatio string `json:"otlpSampleRatio,omitempty"`
 }
 
 type ClusterTuningSpec struct {
@@ -351,6 +364,11 @@ type ClusterTuningSpec struct {
 	// TLS for inter-node replication traffic.
 	// +optional
 	TLS *TLSSpec `json:"tls,omitempty"`
+
+	// When false, WAL peer replication is disabled while metadata cluster
+	// features (Raft, membership sync) remain active.
+	// +optional
+	WalReplicationEnabled *bool `json:"walReplicationEnabled,omitempty"`
 }
 
 // ReplicationSpec controls coordinator-side replication (how this node's

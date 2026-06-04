@@ -3116,6 +3116,11 @@ spec:
                     required:
                     - enabled
                     type: object
+                  walReplicationEnabled:
+                    description: |-
+                      When false, WAL peer replication is disabled while metadata cluster
+                      features (Raft, membership sync) remain active.
+                    type: boolean
                 type: object
               compaction:
                 properties:
@@ -3199,8 +3204,9 @@ spec:
                     format: int32
                     type: integer
                   maxPointsPerBatch:
-                    description: Maximum points buffered per measurement before forcing
-                      a flush. 0 = unlimited.
+                    default: 50000
+                    description: Max points per chDB insert batch (clamped server-side
+                      to 10k–500k).
                     format: int32
                     minimum: 0
                     type: integer
@@ -3271,6 +3277,10 @@ spec:
                 type: array
               logging:
                 properties:
+                  detailedTrace:
+                    description: Emit per-phase performance logs (write/query/flush).
+                      Off by default.
+                    type: boolean
                   format:
                     default: text
                     enum:
@@ -3285,6 +3295,13 @@ spec:
                     - info
                     - warn
                     - error
+                    type: string
+                  otlpEndpoint:
+                    description: OTLP HTTP endpoint for trace export (e.g. http://alloy-logs:4318).
+                    type: string
+                  otlpSampleRatio:
+                    description: Fraction of traces exported to OTLP (0.0–1.0). Default
+                      1.0 when OTLP is set.
                     type: string
                 type: object
               monitoring:
