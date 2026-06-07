@@ -7,6 +7,9 @@ concurrency:
   group: test-chart-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   test-chart:
     name: Test Chart
