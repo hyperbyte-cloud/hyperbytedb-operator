@@ -3,7 +3,7 @@
 # and allow the plugins properly work.
 # More info: https://book.kubebuilder.io/reference/project-config.html
 cliVersion: 4.13.0
-domain: hyperbytedb.io
+domain: hyperbyte.cloud
 layout:
 - go.kubebuilder.io/v4
 plugins:
@@ -17,7 +17,7 @@ resources:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: hyperbytedb.io
+  domain: hyperbyte.cloud
   group: hyperbytedb
   kind: HyperbytedbCluster
   path: github.com/hyperbyte-cloud/hyperbytedb-operator/api/v1alpha1
@@ -26,7 +26,7 @@ resources:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: hyperbytedb.io
+  domain: hyperbyte.cloud
   group: hyperbytedb
   kind: HyperbytedbBackup
   path: github.com/hyperbyte-cloud/hyperbytedb-operator/api/v1alpha1
@@ -35,7 +35,7 @@ resources:
     crdVersion: v1
     namespaced: true
   controller: true
-  domain: hyperbytedb.io
+  domain: hyperbyte.cloud
   group: hyperbytedb
   kind: HyperbytedbRestore
   path: github.com/hyperbyte-cloud/hyperbytedb-operator/api/v1alpha1

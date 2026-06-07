@@ -10,7 +10,7 @@ concurrency:
 jobs:
   lint:
     name: Lint
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     container:
       image: golang:1.25-bookworm
     steps:
