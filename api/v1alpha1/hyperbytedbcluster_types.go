@@ -56,9 +56,6 @@ type HyperbytedbClusterSpec struct {
 	Flush FlushSpec `json:"flush,omitempty"`
 
 	// +optional
-	Compaction CompactionSpec `json:"compaction,omitempty"`
-
-	// +optional
 	ChDB ChDBSpec `json:"chdb,omitempty"`
 
 	// +optional
@@ -84,6 +81,9 @@ type HyperbytedbClusterSpec struct {
 
 	// +optional
 	RateLimit RateLimitSpec `json:"rateLimit,omitempty"`
+
+	// +optional
+	Retention RetentionSpec `json:"retention,omitempty"`
 
 	// +optional
 	Monitoring MonitoringSpec `json:"monitoring,omitempty"`
@@ -167,15 +167,8 @@ type CertManagerIssuerRef struct {
 }
 
 type StorageSpec struct {
-	// +kubebuilder:default="local"
-	// +kubebuilder:validation:Enum=local;s3
-	Backend string `json:"backend,omitempty"`
-
 	// +optional
 	VolumeClaimTemplate *PersistentVolumeClaimSpec `json:"volumeClaimTemplate,omitempty"`
-
-	// +optional
-	S3 *S3StorageSpec `json:"s3,omitempty"`
 }
 
 type PersistentVolumeClaimSpec struct {
@@ -184,16 +177,6 @@ type PersistentVolumeClaimSpec struct {
 
 	// +kubebuilder:default="10Gi"
 	Size resource.Quantity `json:"size,omitempty"`
-}
-
-type S3StorageSpec struct {
-	Bucket   string `json:"bucket"`
-	Prefix   string `json:"prefix,omitempty"`
-	Region   string `json:"region,omitempty"`
-	Endpoint string `json:"endpoint,omitempty"`
-
-	// Reference to a Secret containing access_key_id and secret_access_key.
-	CredentialsSecretName string `json:"credentialsSecretName,omitempty"`
 }
 
 type FlushSpec struct {
@@ -206,7 +189,8 @@ type FlushSpec struct {
 	// +kubebuilder:default="1h"
 	TimeBucketDuration string `json:"timeBucketDuration,omitempty"`
 
-	// Maximum points buffered per measurement before forcing a flush. 0 = unlimited.
+	// Max points per chDB insert batch (clamped server-side to 10k–500k).
+	// +kubebuilder:default=50000
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	MaxPointsPerBatch int32 `json:"maxPointsPerBatch,omitempty"`
@@ -222,50 +206,15 @@ type FlushSpec struct {
 	WALBatchDelayUs int64 `json:"walBatchDelayUs,omitempty"`
 }
 
-type CompactionSpec struct {
-	// +kubebuilder:default=true
-	Enabled *bool `json:"enabled,omitempty"`
-
-	// +kubebuilder:default=300
-	IntervalSecs int32 `json:"intervalSecs,omitempty"`
-
-	// +kubebuilder:default=4
-	MinFilesToCompact int32 `json:"minFilesToCompact,omitempty"`
-
-	// +kubebuilder:default=256
-	TargetFileSizeMB int32 `json:"targetFileSizeMb,omitempty"`
-
-	// Compaction time bucket. "1h" (hourly, default) or "1d" (daily). Daily
-	// buckets merge all 24 hourly files, reducing file count for wide-range queries.
-	// +optional
-	// +kubebuilder:validation:Enum="1h";"1d";"24h"
-	BucketDuration string `json:"bucketDuration,omitempty"`
-
-	// Minimum age (seconds) before per-node files are hash-verified and merged
-	// into a single compacted file.
-	// +optional
-	// +kubebuilder:validation:Minimum=0
-	VerifiedCompactionAgeSecs int64 `json:"verifiedCompactionAgeSecs,omitempty"`
-
-	// When true, periodically compare each active peer's manifest against local
-	// bucket hashes and fetch divergent or missing slices.
-	// +optional
-	SelfRepairEnabled *bool `json:"selfRepairEnabled,omitempty"`
-
-	// Max bucket-hash comparisons (and repair attempts) per compaction tick for
-	// membership self-repair.
-	// +optional
-	// +kubebuilder:validation:Minimum=0
-	MaxRepairChecksPerCycle int32 `json:"maxRepairChecksPerCycle,omitempty"`
-
-	// Max concurrent measurement compactions when running compact_all.
-	// +optional
-	// +kubebuilder:validation:Minimum=0
-	CompactAllMaxInflight int32 `json:"compactAllMaxInflight,omitempty"`
-}
-
 type ChDBSpec struct {
-	// +kubebuilder:default=4
+	// chDB session directory inside the data volume. Defaults to
+	// /var/lib/hyperbytedb/chdb when unset.
+	// +optional
+	SessionDataPath string `json:"sessionDataPath,omitempty"`
+
+	// Ignored by hyperbytedb (libchdb is a process-global singleton). Retained
+	// for API stability; always written as 1 in config.toml.
+	// +kubebuilder:default=1
 	PoolSize int32 `json:"poolSize,omitempty"`
 }
 
@@ -286,6 +235,18 @@ type LoggingSpec struct {
 	// +kubebuilder:default="text"
 	// +kubebuilder:validation:Enum=text;json
 	Format string `json:"format,omitempty"`
+
+	// Emit per-phase performance logs (write/query/flush). Off by default.
+	// +optional
+	DetailedTrace *bool `json:"detailedTrace,omitempty"`
+
+	// OTLP HTTP endpoint for trace export (e.g. http://alloy-logs:4318).
+	// +optional
+	OtlpEndpoint string `json:"otlpEndpoint,omitempty"`
+
+	// Fraction of traces exported to OTLP (0.0–1.0). Default 1.0 when OTLP is set.
+	// +optional
+	OtlpSampleRatio string `json:"otlpSampleRatio,omitempty"`
 }
 
 type ClusterTuningSpec struct {
@@ -294,17 +255,6 @@ type ClusterTuningSpec struct {
 
 	// +kubebuilder:default=5
 	HeartbeatMissThreshold int32 `json:"heartbeatMissThreshold,omitempty"`
-
-	// +kubebuilder:default=60
-	AntiEntropyIntervalSecs int32 `json:"antiEntropyIntervalSecs,omitempty"`
-
-	// When false, hyperbytedb does not run periodic Merkle verify / delta sync.
-	// +kubebuilder:default=true
-	// +optional
-	AntiEntropyEnabled *bool `json:"antiEntropyEnabled,omitempty"`
-
-	// +kubebuilder:default=4
-	SyncMaxConcurrentFiles int32 `json:"syncMaxConcurrentFiles,omitempty"`
 
 	// +kubebuilder:default=5
 	ReplicationMaxRetries int32 `json:"replicationMaxRetries,omitempty"`
@@ -426,6 +376,18 @@ type HintedHandoffSpec struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	MaxHintAgeSecs int64 `json:"maxHintAgeSecs,omitempty"`
+}
+
+// RetentionSpec controls the background retention enforcement loop.
+type RetentionSpec struct {
+	// +kubebuilder:default=true
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// How often retention scans run (humantime duration, e.g. "60s", "5m", "1h").
+	// +kubebuilder:default="60s"
+	// +optional
+	Interval string `json:"interval,omitempty"`
 }
 
 // RateLimitSpec controls per-endpoint request rate limiting.

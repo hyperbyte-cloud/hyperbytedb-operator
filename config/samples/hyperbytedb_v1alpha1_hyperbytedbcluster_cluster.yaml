@@ -11,21 +11,21 @@ spec:
     port: 8086
     requestTimeoutSecs: 30
     queryTimeoutSecs: 30
+    maxConcurrentQueries: 32
   storage:
-    backend: local
     volumeClaimTemplate:
       size: 10Gi
   flush:
     intervalSecs: 10
     walSizeThresholdMb: 64
     timeBucketDuration: "1h"
-  compaction:
-    enabled: true
-    intervalSecs: 300
-    minFilesToCompact: 4
-    targetFileSizeMb: 256
+    maxPointsPerBatch: 50000
   chdb:
-    poolSize: 4
+    sessionDataPath: /var/lib/hyperbytedb/chdb
+    poolSize: 1
+  retention:
+    enabled: true
+    interval: 60s
   logging:
     level: info
     format: json
@@ -39,10 +39,12 @@ spec:
   cluster:
     heartbeatIntervalSecs: 2
     heartbeatMissThreshold: 5
-    antiEntropyIntervalSecs: 60
     replicationMaxRetries: 5
     raftHeartbeatIntervalMs: 300
     raftElectionTimeoutMs: 1000
+    replication:
+      mode: async
+      ackTimeoutMs: 5000
   monitoring:
     enabled: true
     serviceMonitor: true

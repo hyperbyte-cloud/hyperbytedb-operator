@@ -1,11 +1,8 @@
-{{- if .Values.crd.enable }}
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    {{- if .Values.crd.keep }}
-    "helm.sh/resource-policy": keep
-    {{- end }}
     controller-gen.kubebuilder.io/version: v0.20.1
   name: hyperbytedbclusters.hyperbytedb.hyperbytedb.io
 spec:
@@ -36,7 +33,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: HyperbytedbCluster is the Schema for the hyperbytedbclusters API.
+        description: HyperbytedbCluster is the Schema for the hyperbytedbclusters
+          API.
         properties:
           apiVersion:
             description: |-
@@ -2963,24 +2961,36 @@ spec:
                 - enabled
                 - maxReplicas
                 type: object
+              cardinality:
+                description: CardinalitySpec configures cardinality limits enforced
+                  by hyperbytedb.
+                properties:
+                  maxMeasurementsPerDatabase:
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  maxTagValuesPerMeasurement:
+                    format: int64
+                    minimum: 0
+                    type: integer
+                type: object
               chdb:
                 properties:
                   poolSize:
-                    default: 4
+                    default: 1
+                    description: |-
+                      Ignored by hyperbytedb (libchdb is a process-global singleton). Retained
+                      for API stability; always written as 1 in config.toml.
                     format: int32
                     type: integer
+                  sessionDataPath:
+                    description: |-
+                      chDB session directory inside the data volume. Defaults to
+                      /var/lib/hyperbytedb/chdb when unset.
+                    type: string
                 type: object
               cluster:
                 properties:
-                  antiEntropyEnabled:
-                    default: true
-                    description: When false, hyperbytedb does not run periodic Merkle
-                      verify / delta sync.
-                    type: boolean
-                  antiEntropyIntervalSecs:
-                    default: 60
-                    format: int32
-                    type: integer
                   heartbeatIntervalSecs:
                     default: 2
                     format: int32
@@ -3001,13 +3011,78 @@ spec:
                     default: 1000
                     format: int32
                     type: integer
+                  replicateReceiverQueueDepth:
+                    description: Bounded apply queue on the replicate receiver.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  replication:
+                    description: Per-node, per-write replication mode and tuning.
+                    properties:
+                      ackTimeoutMs:
+                        default: 5000
+                        description: |-
+                          Worst-case latency budget (ms) for sync_quorum writes. On timeout the
+                          coordinator returns 504; in-flight peer tasks keep running and unacked
+                          peers fall back to hinted handoff.
+                        format: int64
+                        minimum: 0
+                        type: integer
+                      mode:
+                        default: async
+                        description: |-
+                          Replication mode. "async" is fire-and-forget HTTP fan-out (default,
+                          preserves today's behavior). "sync_quorum" awaits W-of-N peer acks
+                          before returning to the client.
+                        enum:
+                        - async
+                        - sync_quorum
+                        type: string
+                      syncQuorum:
+                        description: SyncQuorumSpec configures the sync_quorum replication
+                          mode.
+                        properties:
+                          minAcks:
+                            anyOf:
+                            - type: integer
+                            - type: string
+                            description: |-
+                              Number of peer acks required for sync_quorum. Either the string
+                              "majority" (resolved at request time against current active peers) or an
+                              explicit integer count. The local WAL append always happens first, so
+                              self-durability is implicit and the local node is never counted toward
+                              the quorum.
+                            x-kubernetes-int-or-string: true
+                        type: object
+                    type: object
+                  replicationMaxCoalesceBodyBytes:
+                    description: Max bytes for coalescing consecutive WAL batches
+                      with the same db/rp/precision.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  replicationMaxInflightBatches:
+                    description: Max concurrent outbound replication fan-out rounds
+                      (token bucket).
+                    format: int32
+                    minimum: 0
+                    type: integer
                   replicationMaxRetries:
                     default: 5
                     format: int32
                     type: integer
-                  syncMaxConcurrentFiles:
-                    default: 4
+                  replicationQueueDepth:
+                    description: Bounded outbound replication queue depth (ingest-sized
+                      batches).
                     format: int32
+                    minimum: 0
+                    type: integer
+                  replicationTruncateStalePeerMultiplier:
+                    description: |-
+                      When >0, peers with ack 0 and stale heartbeats (older than
+                      heartbeatIntervalSecs * multiplier) are omitted from the WAL truncate barrier.
+                    format: int64
+                    minimum: 0
                     type: integer
                   tls:
                     description: TLS for inter-node replication traffic.
@@ -3036,24 +3111,6 @@ spec:
                     required:
                     - enabled
                     type: object
-                type: object
-              compaction:
-                properties:
-                  enabled:
-                    default: true
-                    type: boolean
-                  intervalSecs:
-                    default: 300
-                    format: int32
-                    type: integer
-                  minFilesToCompact:
-                    default: 4
-                    format: int32
-                    type: integer
-                  targetFileSizeMb:
-                    default: 256
-                    format: int32
-                    type: integer
                 type: object
               failover:
                 description: FailoverSpec controls automatic failure detection and
@@ -3084,12 +3141,51 @@ spec:
                     default: 10
                     format: int32
                     type: integer
+                  maxPointsPerBatch:
+                    default: 50000
+                    description: Max points per chDB insert batch (clamped server-side
+                      to 10k–500k).
+                    format: int32
+                    minimum: 0
+                    type: integer
                   timeBucketDuration:
                     default: 1h
                     type: string
+                  walBatchDelayUs:
+                    description: 'WAL group-commit: max microseconds to wait for more
+                      entries before flushing.'
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  walBatchSize:
+                    description: 'WAL group-commit: max entries to coalesce per write
+                      batch. 0 = disabled.'
+                    format: int32
+                    minimum: 0
+                    type: integer
                   walSizeThresholdMb:
                     default: 64
                     format: int32
+                    type: integer
+                type: object
+              hintedHandoff:
+                description: |-
+                  HintedHandoffSpec configures the hinted-handoff queue used to retry writes
+                  against peers that were temporarily unreachable.
+                properties:
+                  enabled:
+                    type: boolean
+                  maxHintAgeSecs:
+                    description: Hints older than this (seconds) are discarded on
+                      drain.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  maxHintsPerPeer:
+                    description: Maximum queued hints per unreachable peer before
+                      oldest are dropped.
+                    format: int64
+                    minimum: 0
                     type: integer
                 type: object
               image:
@@ -3119,6 +3215,10 @@ spec:
                 type: array
               logging:
                 properties:
+                  detailedTrace:
+                    description: Emit per-phase performance logs (write/query/flush).
+                      Off by default.
+                    type: boolean
                   format:
                     default: text
                     enum:
@@ -3133,6 +3233,13 @@ spec:
                     - info
                     - warn
                     - error
+                    type: string
+                  otlpEndpoint:
+                    description: OTLP HTTP endpoint for trace export (e.g. http://alloy-logs:4318).
+                    type: string
+                  otlpSampleRatio:
+                    description: Fraction of traces exported to OTLP (0.0–1.0). Default
+                      1.0 when OTLP is set.
                     type: string
                 type: object
               monitoring:
@@ -3156,6 +3263,193 @@ spec:
               podLabels:
                 additionalProperties:
                   type: string
+                type: object
+              proxy:
+                description: |-
+                  Proxy deploys a stateless `hyperbytedb-proxy` Deployment in front of the
+                  StatefulSet to absorb rolling restarts and drain events without
+                  returning errors to clients.
+                properties:
+                  enabled:
+                    default: false
+                    description: |-
+                      When false, the operator does not create or reconcile any proxy
+                      resources. Existing proxy Deployment/Service (if any) are left alone
+                      so they can be cleaned up out-of-band.
+                    type: boolean
+                  healthPath:
+                    description: |-
+                      HTTP path used for backend health probes. Defaults to `/health`.
+                      Set to `/health/ready` for the deeper chDB-aware readiness check.
+                    type: string
+                  holdTimeoutSecs:
+                    default: 10
+                    description: |-
+                      How long the proxy waits for a backend to come back before failing a
+                      request with 503. Bigger values mean rolling restarts are smoother but
+                      individual stuck requests sit longer.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  image:
+                    default: hyperbytedb-proxy:latest
+                    type: string
+                  imagePullPolicy:
+                    description: PullPolicy describes a policy for if/when to pull
+                      a container image
+                    type: string
+                  imagePullSecrets:
+                    items:
+                      description: |-
+                        LocalObjectReference contains enough information to let you locate the
+                        referenced object inside the same namespace.
+                      properties:
+                        name:
+                          default: ""
+                          description: |-
+                            Name of the referent.
+                            This field is effectively required, but due to backwards compatibility is
+                            allowed to be empty. Instances of this type with an empty value here are
+                            almost certainly wrong.
+                            More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                          type: string
+                      type: object
+                      x-kubernetes-map-type: atomic
+                    type: array
+                  maxRetries:
+                    default: 2
+                    description: Cap on per-backend retries for one request. 0 disables
+                      retries.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  nodePort:
+                    description: |-
+                      Explicit nodePort when ServiceType=NodePort. Required for kind clusters
+                      that pre-map a host port to a fixed nodePort.
+                    format: int32
+                    maximum: 32767
+                    minimum: 30000
+                    type: integer
+                  podAnnotations:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  podLabels:
+                    additionalProperties:
+                      type: string
+                    type: object
+                  port:
+                    description: |-
+                      Port the proxy Service exposes. Defaults to the cluster server port so
+                      existing clients can re-target the Service name with no port change.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                  replicas:
+                    default: 2
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  requestTimeoutSecs:
+                    description: |-
+                      Per-request budget the proxy allows for the upstream call. Defaults
+                      to ~ServerSpec.RequestTimeoutSecs.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  resources:
+                    description: ResourceRequirements describes the compute resource
+                      requirements.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  serviceType:
+                    description: |-
+                      Type of the proxy Service. Defaults to ClusterIP. Set NodePort/
+                      LoadBalancer to expose externally.
+                    enum:
+                    - ClusterIP
+                    - NodePort
+                    - LoadBalancer
+                    type: string
+                  shutdownGraceSecs:
+                    default: 30
+                    description: |-
+                      How long the proxy keeps serving in-flight requests after SIGTERM
+                      before exiting. Should comfortably exceed the longest expected query.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                required:
+                - enabled
+                type: object
+              rateLimit:
+                description: RateLimitSpec controls per-endpoint request rate limiting.
+                properties:
+                  enabled:
+                    type: boolean
+                  maxRequestsPerSecond:
+                    description: Maximum requests per second per endpoint (/write,
+                      /query). 0 = unlimited.
+                    format: int64
+                    minimum: 0
+                    type: integer
                 type: object
               replicas:
                 default: 1
@@ -3221,11 +3515,29 @@ spec:
                       More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                     type: object
                 type: object
+              retention:
+                description: RetentionSpec controls the background retention enforcement
+                  loop.
+                properties:
+                  enabled:
+                    default: true
+                    type: boolean
+                  interval:
+                    default: 60s
+                    description: How often retention scans run (humantime duration,
+                      e.g. "60s", "5m", "1h").
+                    type: string
+                type: object
               server:
                 properties:
                   maxBodySizeBytes:
                     default: 26214400
                     format: int64
+                    type: integer
+                  maxConcurrentQueries:
+                    description: Maximum concurrent /query requests. 0 = unlimited.
+                    format: int32
+                    minimum: 0
                     type: integer
                   port:
                     default: 8086
@@ -3268,31 +3580,23 @@ spec:
                     - enabled
                     type: object
                 type: object
+              statementSummary:
+                description: |-
+                  StatementSummarySpec controls collection of per-statement execution stats
+                  exposed via /debug/statement_summary.
+                properties:
+                  enabled:
+                    type: boolean
+                  maxEntries:
+                    description: |-
+                      Maximum number of distinct statements tracked. Oldest entries are evicted
+                      when the limit is exceeded.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                type: object
               storage:
                 properties:
-                  backend:
-                    default: local
-                    enum:
-                    - local
-                    - s3
-                    type: string
-                  s3:
-                    properties:
-                      bucket:
-                        type: string
-                      credentialsSecretName:
-                        description: Reference to a Secret containing access_key_id
-                          and secret_access_key.
-                        type: string
-                      endpoint:
-                        type: string
-                      prefix:
-                        type: string
-                      region:
-                        type: string
-                    required:
-                    - bucket
-                    type: object
                   volumeClaimTemplate:
                     properties:
                       size:
@@ -3673,4 +3977,3 @@ spec:
     storage: true
     subresources:
       status: {}
-{{- end }}

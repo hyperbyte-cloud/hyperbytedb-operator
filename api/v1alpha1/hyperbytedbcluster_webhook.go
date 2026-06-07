@@ -51,10 +51,6 @@ func (w *HyperbytedbClusterWebhook) Default(_ context.Context, obj *HyperbytedbC
 		obj.Spec.Server.Port = 8086
 	}
 
-	if obj.Spec.Storage.Backend == "" {
-		obj.Spec.Storage.Backend = "local"
-	}
-
 	if obj.Spec.Storage.VolumeClaimTemplate == nil {
 		obj.Spec.Storage.VolumeClaimTemplate = &PersistentVolumeClaimSpec{
 			Size: resource.MustParse("10Gi"),
@@ -78,6 +74,14 @@ func (w *HyperbytedbClusterWebhook) Default(_ context.Context, obj *HyperbytedbC
 
 	if obj.Spec.Flush.TimeBucketDuration == "" {
 		obj.Spec.Flush.TimeBucketDuration = "1h"
+	}
+
+	if obj.Spec.ChDB.PoolSize == 0 {
+		obj.Spec.ChDB.PoolSize = 1
+	}
+
+	if obj.Spec.Retention.Interval == "" {
+		obj.Spec.Retention.Interval = "60s"
 	}
 
 	return nil
@@ -109,10 +113,6 @@ func validateCluster(cluster *HyperbytedbCluster) (admission.Warnings, error) {
 
 	if cluster.Spec.Server.Port != 0 && (cluster.Spec.Server.Port < 1 || cluster.Spec.Server.Port > 65535) {
 		return nil, fmt.Errorf("server port must be between 1 and 65535, got %d", cluster.Spec.Server.Port)
-	}
-
-	if cluster.Spec.Storage.Backend == "s3" && cluster.Spec.Storage.S3 == nil {
-		return nil, fmt.Errorf("storage.s3 configuration required when backend is 's3'")
 	}
 
 	if cluster.Spec.Autoscaling != nil && cluster.Spec.Autoscaling.Enabled {
