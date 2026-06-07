@@ -10,13 +10,13 @@ spec:
   server:
     port: 8086
   storage:
-    backend: local
     volumeClaimTemplate:
       size: 5Gi
   flush:
     intervalSecs: 10
-  compaction:
+  retention:
     enabled: true
+    interval: 60s
   logging:
     level: info
     format: text

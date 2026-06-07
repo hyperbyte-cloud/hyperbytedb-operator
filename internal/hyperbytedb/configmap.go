@@ -12,6 +12,14 @@ import (
 	v1alpha1 "github.com/hyperbyte-cloud/hyperbytedb-operator/api/v1alpha1"
 )
 
+const (
+	defaultChdbSessionPath = "/var/lib/hyperbytedb/chdb"
+	defaultWalDir          = "/var/lib/hyperbytedb/wal"
+	defaultMetaDir         = "/var/lib/hyperbytedb/meta"
+	defaultRaftDir         = "/var/lib/hyperbytedb/raft"
+	defaultReplLogDir      = "/var/lib/hyperbytedb/replication_log"
+)
+
 func ConfigMapName(cluster *v1alpha1.HyperbytedbCluster) string {
 	return cluster.Name + "-config"
 }
@@ -53,24 +61,13 @@ func clusterMetadataEnabled(cluster *v1alpha1.HyperbytedbCluster) bool {
 	return replicas > 1
 }
 
-func walReplicationEnabled(cluster *v1alpha1.HyperbytedbCluster) bool {
-	if cluster.Spec.Cluster.WalReplicationEnabled != nil {
-		return *cluster.Spec.Cluster.WalReplicationEnabled
-	}
-	if resolvedBackend(&cluster.Spec) == "clickhouse_remote" {
-		return false
-	}
-	return true
-}
-
 func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, clusterEnabled bool) string {
 	spec := &cluster.Spec
 	var b strings.Builder
 
 	writeServerSection(&b, spec)
-	writeStorageSection(&b, spec)
+	writeStorageSection(&b)
 	writeFlushSection(&b, spec)
-	writeCompactionSection(&b, spec)
 	writeChdbSection(&b, spec)
 	writeAuthSection(&b, spec)
 	writeCardinalitySection(&b, spec)
@@ -78,6 +75,7 @@ func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, cl
 	writeStatementSummarySection(&b, spec)
 	writeHintedHandoffSection(&b, spec)
 	writeRateLimitSection(&b, spec)
+	writeRetentionSection(&b, spec)
 	writeClusterSection(&b, cluster, clusterEnabled)
 
 	return b.String()
@@ -100,43 +98,20 @@ func writeServerSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpe
 	if spec.Server.QueryTimeoutSecs > 0 {
 		fmt.Fprintf(b, "query_timeout_secs = %d\n", spec.Server.QueryTimeoutSecs)
 	}
-	// 0 means unlimited; emit only when caller explicitly set a positive limit.
 	if spec.Server.MaxConcurrentQueries > 0 {
 		fmt.Fprintf(b, "max_concurrent_queries = %d\n", spec.Server.MaxConcurrentQueries)
 	}
-
 	if spec.Server.TLS != nil && spec.Server.TLS.Enabled {
-		b.WriteString("\n[server.tls]\n")
-		b.WriteString("enabled = true\n")
-		b.WriteString("cert_file = \"/etc/hyperbytedb/tls/tls.crt\"\n")
-		b.WriteString("key_file = \"/etc/hyperbytedb/tls/tls.key\"\n")
+		b.WriteString("tls_enabled = true\n")
+		b.WriteString("tls_cert_path = \"/etc/hyperbytedb/tls/tls.crt\"\n")
+		b.WriteString("tls_key_path = \"/etc/hyperbytedb/tls/tls.key\"\n")
 	}
 }
 
-func writeStorageSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
+func writeStorageSection(b *strings.Builder) {
 	b.WriteString("\n[storage]\n")
-	b.WriteString("data_dir = \"/var/lib/hyperbytedb/data\"\n")
-	b.WriteString("wal_dir = \"/var/lib/hyperbytedb/wal\"\n")
-	b.WriteString("meta_dir = \"/var/lib/hyperbytedb/meta\"\n")
-	backend := "local"
-	if spec.Storage.Backend != "" {
-		backend = spec.Storage.Backend
-	}
-	fmt.Fprintf(b, "backend = \"%s\"\n", backend)
-
-	if spec.Storage.S3 != nil {
-		b.WriteString("\n[storage.s3]\n")
-		fmt.Fprintf(b, "bucket = \"%s\"\n", spec.Storage.S3.Bucket)
-		if spec.Storage.S3.Prefix != "" {
-			fmt.Fprintf(b, "prefix = \"%s\"\n", spec.Storage.S3.Prefix)
-		}
-		if spec.Storage.S3.Region != "" {
-			fmt.Fprintf(b, "region = \"%s\"\n", spec.Storage.S3.Region)
-		}
-		if spec.Storage.S3.Endpoint != "" {
-			fmt.Fprintf(b, "endpoint = \"%s\"\n", spec.Storage.S3.Endpoint)
-		}
-	}
+	fmt.Fprintf(b, "wal_dir = \"%s\"\n", defaultWalDir)
+	fmt.Fprintf(b, "meta_dir = \"%s\"\n", defaultMetaDir)
 }
 
 func writeFlushSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
@@ -169,49 +144,14 @@ func writeFlushSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec
 	}
 }
 
-func writeCompactionSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
-	b.WriteString("\n[compaction]\n")
-	compactionEnabled := true
-	if spec.Compaction.Enabled != nil {
-		compactionEnabled = *spec.Compaction.Enabled
-	}
-	fmt.Fprintf(b, "enabled = %t\n", compactionEnabled)
-	compactionInterval := int32(300)
-	if spec.Compaction.IntervalSecs > 0 {
-		compactionInterval = spec.Compaction.IntervalSecs
-	}
-	fmt.Fprintf(b, "interval_secs = %d\n", compactionInterval)
-	minFiles := int32(4)
-	if spec.Compaction.MinFilesToCompact > 0 {
-		minFiles = spec.Compaction.MinFilesToCompact
-	}
-	fmt.Fprintf(b, "min_files_to_compact = %d\n", minFiles)
-	targetSize := int32(256)
-	if spec.Compaction.TargetFileSizeMB > 0 {
-		targetSize = spec.Compaction.TargetFileSizeMB
-	}
-	fmt.Fprintf(b, "target_file_size_mb = %d\n", targetSize)
-	if spec.Compaction.BucketDuration != "" {
-		fmt.Fprintf(b, "bucket_duration = \"%s\"\n", spec.Compaction.BucketDuration)
-	}
-	if spec.Compaction.VerifiedCompactionAgeSecs > 0 {
-		fmt.Fprintf(b, "verified_compaction_age_secs = %d\n", spec.Compaction.VerifiedCompactionAgeSecs)
-	}
-	if spec.Compaction.SelfRepairEnabled != nil {
-		fmt.Fprintf(b, "self_repair_enabled = %t\n", *spec.Compaction.SelfRepairEnabled)
-	}
-	if spec.Compaction.MaxRepairChecksPerCycle > 0 {
-		fmt.Fprintf(b, "max_repair_checks_per_cycle = %d\n", spec.Compaction.MaxRepairChecksPerCycle)
-	}
-	if spec.Compaction.CompactAllMaxInflight > 0 {
-		fmt.Fprintf(b, "compact_all_max_inflight = %d\n", spec.Compaction.CompactAllMaxInflight)
-	}
-}
-
 func writeChdbSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
 	b.WriteString("\n[chdb]\n")
-	b.WriteString("session_data_path = \"/var/lib/hyperbytedb/chdb\"\n")
-	poolSize := int32(4)
+	sessionPath := defaultChdbSessionPath
+	if spec.ChDB.SessionDataPath != "" {
+		sessionPath = spec.ChDB.SessionDataPath
+	}
+	fmt.Fprintf(b, "session_data_path = \"%s\"\n", sessionPath)
+	poolSize := int32(1)
 	if spec.ChDB.PoolSize > 0 {
 		poolSize = spec.ChDB.PoolSize
 	}
@@ -224,16 +164,17 @@ func writeAuthSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec)
 }
 
 func writeCardinalitySection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
-	if spec.Cardinality.MaxTagValuesPerMeasurement == 0 && spec.Cardinality.MaxMeasurementsPerDatabase == 0 {
-		return
+	maxTag := int64(100_000)
+	if spec.Cardinality.MaxTagValuesPerMeasurement > 0 {
+		maxTag = spec.Cardinality.MaxTagValuesPerMeasurement
+	}
+	maxMeas := int64(10_000)
+	if spec.Cardinality.MaxMeasurementsPerDatabase > 0 {
+		maxMeas = spec.Cardinality.MaxMeasurementsPerDatabase
 	}
 	b.WriteString("\n[cardinality]\n")
-	if spec.Cardinality.MaxTagValuesPerMeasurement > 0 {
-		fmt.Fprintf(b, "max_tag_values_per_measurement = %d\n", spec.Cardinality.MaxTagValuesPerMeasurement)
-	}
-	if spec.Cardinality.MaxMeasurementsPerDatabase > 0 {
-		fmt.Fprintf(b, "max_measurements_per_database = %d\n", spec.Cardinality.MaxMeasurementsPerDatabase)
-	}
+	fmt.Fprintf(b, "max_tag_values_per_measurement = %d\n", maxTag)
+	fmt.Fprintf(b, "max_measurements_per_database = %d\n", maxMeas)
 }
 
 func writeLoggingSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
@@ -260,32 +201,36 @@ func writeLoggingSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSp
 }
 
 func writeStatementSummarySection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
-	if spec.StatementSummary.Enabled == nil && spec.StatementSummary.MaxEntries == 0 {
-		return
+	enabled := true
+	if spec.StatementSummary.Enabled != nil {
+		enabled = *spec.StatementSummary.Enabled
+	}
+	maxEntries := int32(1000)
+	if spec.StatementSummary.MaxEntries > 0 {
+		maxEntries = spec.StatementSummary.MaxEntries
 	}
 	b.WriteString("\n[statement_summary]\n")
-	if spec.StatementSummary.Enabled != nil {
-		fmt.Fprintf(b, "enabled = %t\n", *spec.StatementSummary.Enabled)
-	}
-	if spec.StatementSummary.MaxEntries > 0 {
-		fmt.Fprintf(b, "max_entries = %d\n", spec.StatementSummary.MaxEntries)
-	}
+	fmt.Fprintf(b, "enabled = %t\n", enabled)
+	fmt.Fprintf(b, "max_entries = %d\n", maxEntries)
 }
 
 func writeHintedHandoffSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
-	if spec.HintedHandoff.Enabled == nil && spec.HintedHandoff.MaxHintsPerPeer == 0 && spec.HintedHandoff.MaxHintAgeSecs == 0 {
-		return
+	enabled := true
+	if spec.HintedHandoff.Enabled != nil {
+		enabled = *spec.HintedHandoff.Enabled
+	}
+	maxHints := int64(100_000)
+	if spec.HintedHandoff.MaxHintsPerPeer > 0 {
+		maxHints = spec.HintedHandoff.MaxHintsPerPeer
+	}
+	maxAge := int64(3600)
+	if spec.HintedHandoff.MaxHintAgeSecs > 0 {
+		maxAge = spec.HintedHandoff.MaxHintAgeSecs
 	}
 	b.WriteString("\n[hinted_handoff]\n")
-	if spec.HintedHandoff.Enabled != nil {
-		fmt.Fprintf(b, "enabled = %t\n", *spec.HintedHandoff.Enabled)
-	}
-	if spec.HintedHandoff.MaxHintsPerPeer > 0 {
-		fmt.Fprintf(b, "max_hints_per_peer = %d\n", spec.HintedHandoff.MaxHintsPerPeer)
-	}
-	if spec.HintedHandoff.MaxHintAgeSecs > 0 {
-		fmt.Fprintf(b, "max_hint_age_secs = %d\n", spec.HintedHandoff.MaxHintAgeSecs)
-	}
+	fmt.Fprintf(b, "enabled = %t\n", enabled)
+	fmt.Fprintf(b, "max_hints_per_peer = %d\n", maxHints)
+	fmt.Fprintf(b, "max_hint_age_secs = %d\n", maxAge)
 }
 
 func writeRateLimitSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
@@ -301,12 +246,27 @@ func writeRateLimitSection(b *strings.Builder, spec *v1alpha1.HyperbytedbCluster
 	}
 }
 
+func writeRetentionSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
+	enabled := true
+	if spec.Retention.Enabled != nil {
+		enabled = *spec.Retention.Enabled
+	}
+	interval := "60s"
+	if spec.Retention.Interval != "" {
+		interval = spec.Retention.Interval
+	}
+	b.WriteString("\n[retention]\n")
+	fmt.Fprintf(b, "enabled = %t\n", enabled)
+	fmt.Fprintf(b, "interval = \"%s\"\n", interval)
+}
+
 func writeClusterSection(b *strings.Builder, cluster *v1alpha1.HyperbytedbCluster, clusterEnabled bool) {
 	spec := &cluster.Spec
 	b.WriteString("\n[cluster]\n")
 	fmt.Fprintf(b, "enabled = %t\n", clusterEnabled)
-	fmt.Fprintf(b, "wal_replication_enabled = %t\n", walReplicationEnabled(cluster))
-	b.WriteString("replication_log_dir = \"/var/lib/hyperbytedb/replication_log\"\n")
+	b.WriteString("peers = \"\"\n")
+	b.WriteString(fmt.Sprintf("replication_log_dir = \"%s\"\n", defaultReplLogDir))
+	b.WriteString(fmt.Sprintf("raft_dir = \"%s\"\n", defaultRaftDir))
 
 	heartbeatInterval := int32(2)
 	if spec.Cluster.HeartbeatIntervalSecs > 0 {
@@ -320,63 +280,51 @@ func writeClusterSection(b *strings.Builder, cluster *v1alpha1.HyperbytedbCluste
 	}
 	fmt.Fprintf(b, "heartbeat_miss_threshold = %d\n", heartbeatMiss)
 
-	aeEnabled := true
-	if spec.Cluster.AntiEntropyEnabled != nil {
-		aeEnabled = *spec.Cluster.AntiEntropyEnabled
-	}
-	fmt.Fprintf(b, "anti_entropy_enabled = %t\n", aeEnabled)
-
-	aeInterval := int32(60)
-	if spec.Cluster.AntiEntropyIntervalSecs > 0 {
-		aeInterval = spec.Cluster.AntiEntropyIntervalSecs
-	}
-	fmt.Fprintf(b, "anti_entropy_interval_secs = %d\n", aeInterval)
-
-	syncFiles := int32(4)
-	if spec.Cluster.SyncMaxConcurrentFiles > 0 {
-		syncFiles = spec.Cluster.SyncMaxConcurrentFiles
-	}
-	fmt.Fprintf(b, "sync_max_concurrent_files = %d\n", syncFiles)
-
 	replRetries := int32(5)
 	if spec.Cluster.ReplicationMaxRetries > 0 {
 		replRetries = spec.Cluster.ReplicationMaxRetries
 	}
 	fmt.Fprintf(b, "replication_max_retries = %d\n", replRetries)
 
+	replQueue := int32(8192)
 	if spec.Cluster.ReplicationQueueDepth > 0 {
-		fmt.Fprintf(b, "replication_queue_depth = %d\n", spec.Cluster.ReplicationQueueDepth)
+		replQueue = spec.Cluster.ReplicationQueueDepth
 	}
+	fmt.Fprintf(b, "replication_queue_depth = %d\n", replQueue)
+
+	replInflight := int32(8)
 	if spec.Cluster.ReplicationMaxInflightBatches > 0 {
-		fmt.Fprintf(b, "replication_max_inflight_batches = %d\n", spec.Cluster.ReplicationMaxInflightBatches)
+		replInflight = spec.Cluster.ReplicationMaxInflightBatches
 	}
+	fmt.Fprintf(b, "replication_max_inflight_batches = %d\n", replInflight)
+
+	replCoalesce := int64(8 * 1024 * 1024)
 	if spec.Cluster.ReplicationMaxCoalesceBodyBytes > 0 {
-		fmt.Fprintf(b, "replication_max_coalesce_body_bytes = %d\n", spec.Cluster.ReplicationMaxCoalesceBodyBytes)
+		replCoalesce = spec.Cluster.ReplicationMaxCoalesceBodyBytes
 	}
+	fmt.Fprintf(b, "replication_max_coalesce_body_bytes = %d\n", replCoalesce)
+
+	recvQueue := int32(1024)
 	if spec.Cluster.ReplicateReceiverQueueDepth > 0 {
-		fmt.Fprintf(b, "replicate_receiver_queue_depth = %d\n", spec.Cluster.ReplicateReceiverQueueDepth)
+		recvQueue = spec.Cluster.ReplicateReceiverQueueDepth
 	}
+	fmt.Fprintf(b, "replicate_receiver_queue_depth = %d\n", recvQueue)
+
+	truncateMult := int64(2)
 	if spec.Cluster.ReplicationTruncateStalePeerMultiplier > 0 {
-		fmt.Fprintf(b, "replication_truncate_stale_peer_multiplier = %d\n", spec.Cluster.ReplicationTruncateStalePeerMultiplier)
+		truncateMult = spec.Cluster.ReplicationTruncateStalePeerMultiplier
 	}
+	fmt.Fprintf(b, "replication_truncate_stale_peer_multiplier = %d\n", truncateMult)
 
-	raftHB := int32(300)
 	if spec.Cluster.RaftHeartbeatIntervalMs > 0 {
-		raftHB = spec.Cluster.RaftHeartbeatIntervalMs
+		fmt.Fprintf(b, "raft_heartbeat_interval_ms = %d\n", spec.Cluster.RaftHeartbeatIntervalMs)
 	}
-	fmt.Fprintf(b, "raft_heartbeat_interval_ms = %d\n", raftHB)
-
-	raftElection := int32(1000)
 	if spec.Cluster.RaftElectionTimeoutMs > 0 {
-		raftElection = spec.Cluster.RaftElectionTimeoutMs
+		fmt.Fprintf(b, "raft_election_timeout_ms = %d\n", spec.Cluster.RaftElectionTimeoutMs)
 	}
-	fmt.Fprintf(b, "raft_election_timeout_ms = %d\n", raftElection)
-
-	raftSnapshot := int32(1000)
 	if spec.Cluster.RaftSnapshotThreshold > 0 {
-		raftSnapshot = spec.Cluster.RaftSnapshotThreshold
+		fmt.Fprintf(b, "raft_snapshot_threshold = %d\n", spec.Cluster.RaftSnapshotThreshold)
 	}
-	fmt.Fprintf(b, "raft_snapshot_threshold = %d\n", raftSnapshot)
 
 	writeReplicationSubsections(b, spec.Cluster.Replication)
 }
@@ -405,7 +353,6 @@ func writeMinAcks(b *strings.Builder, v *intstr.IntOrString) {
 	case intstr.Int:
 		fmt.Fprintf(b, "min_acks = %d\n", v.IntValue())
 	case intstr.String:
-		// Quote string forms (e.g. "majority") so TOML treats them as strings.
 		fmt.Fprintf(b, "min_acks = \"%s\"\n", v.StrVal)
 	}
 }

@@ -129,11 +129,14 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 	}
 
 	// --------------- env vars ---------------
+	chdbPath := defaultChdbSessionPath
+	if cluster.Spec.ChDB.SessionDataPath != "" {
+		chdbPath = cluster.Spec.ChDB.SessionDataPath
+	}
 	env := []corev1.EnvVar{
-		{Name: "HYPERBYTEDB__STORAGE__DATA_DIR", Value: "/var/lib/hyperbytedb/data"},
-		{Name: "HYPERBYTEDB__STORAGE__WAL_DIR", Value: "/var/lib/hyperbytedb/wal"},
-		{Name: "HYPERBYTEDB__STORAGE__META_DIR", Value: "/var/lib/hyperbytedb/meta"},
-		{Name: "HYPERBYTEDB__CHDB__SESSION_DATA_PATH", Value: "/var/lib/hyperbytedb/chdb"},
+		{Name: "HYPERBYTEDB__STORAGE__WAL_DIR", Value: defaultWalDir},
+		{Name: "HYPERBYTEDB__STORAGE__META_DIR", Value: defaultMetaDir},
+		{Name: "HYPERBYTEDB__CHDB__SESSION_DATA_PATH", Value: chdbPath},
 	}
 	if cluster.Spec.Logging.OtlpEndpoint != "" {
 		env = append(env, corev1.EnvVar{Name: "OTEL_SERVICE_NAME", Value: cluster.Name})
@@ -141,37 +144,6 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 
 	// Cluster mode and paths come from mounted config.toml (hot-updated on scale);
 	// avoid replica-dependent env vars so the pod template stays stable across scale events.
-
-	if cluster.Spec.Storage.S3 != nil && cluster.Spec.Storage.S3.CredentialsSecretName != "" {
-		env = append(env,
-			corev1.EnvVar{
-				Name: "HYPERBYTEDB__STORAGE__S3__ACCESS_KEY_ID",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: cluster.Spec.Storage.S3.CredentialsSecretName},
-						Key:                  "access_key_id",
-					},
-				},
-			},
-			corev1.EnvVar{
-				Name: "HYPERBYTEDB__STORAGE__S3__SECRET_ACCESS_KEY",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: cluster.Spec.Storage.S3.CredentialsSecretName},
-						Key:                  "secret_access_key",
-					},
-				},
-			},
-		)
-	}
-
-	if cluster.Spec.Server.TLS != nil && cluster.Spec.Server.TLS.Enabled {
-		env = append(env,
-			corev1.EnvVar{Name: "HYPERBYTEDB__SERVER__TLS__ENABLED", Value: "true"},
-			corev1.EnvVar{Name: "HYPERBYTEDB__SERVER__TLS__CERT_FILE", Value: "/etc/hyperbytedb/tls/tls.crt"},
-			corev1.EnvVar{Name: "HYPERBYTEDB__SERVER__TLS__KEY_FILE", Value: "/etc/hyperbytedb/tls/tls.key"},
-		)
-	}
 
 	// --------------- volume mounts ---------------
 	volumeMounts := []corev1.VolumeMount{

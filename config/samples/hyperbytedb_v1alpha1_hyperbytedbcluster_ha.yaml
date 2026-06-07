@@ -12,33 +12,39 @@ spec:
     requestTimeoutSecs: 60
     queryTimeoutSecs: 60
   storage:
-    backend: s3
     volumeClaimTemplate:
       size: 50Gi
       storageClassName: fast-ssd
-    s3:
-      bucket: hyperbytedb-data
-      prefix: "production/"
-      region: us-east-1
-      endpoint: ""
-      credentialsSecretName: hyperbytedb-s3-credentials
   flush:
     intervalSecs: 5
     walSizeThresholdMb: 128
     timeBucketDuration: "1h"
-  compaction:
-    enabled: true
-    intervalSecs: 120
-    minFilesToCompact: 4
-    targetFileSizeMb: 512
   chdb:
-    poolSize: 8
+    sessionDataPath: /var/lib/hyperbytedb/chdb
   auth:
     enabled: true
     credentialsSecretName: hyperbytedb-auth
   logging:
     level: info
     format: json
+    otlpEndpoint: http://alloy-logs:4318
+    otlpSampleRatio: "0.1"
+  cardinality:
+    maxTagValuesPerMeasurement: 100000
+    maxMeasurementsPerDatabase: 10000
+  statementSummary:
+    enabled: true
+    maxEntries: 1000
+  hintedHandoff:
+    enabled: true
+    maxHintsPerPeer: 100000
+    maxHintAgeSecs: 3600
+  rateLimit:
+    enabled: true
+    maxRequestsPerSecond: 1000
+  retention:
+    enabled: true
+    interval: 5m
   resources:
     requests:
       cpu: "2"
@@ -49,12 +55,20 @@ spec:
   cluster:
     heartbeatIntervalSecs: 1
     heartbeatMissThreshold: 3
-    antiEntropyIntervalSecs: 30
-    syncMaxConcurrentFiles: 8
     replicationMaxRetries: 10
     raftHeartbeatIntervalMs: 200
     raftElectionTimeoutMs: 800
     raftSnapshotThreshold: 500
+    replicationQueueDepth: 8192
+    replicationMaxInflightBatches: 8
+    replicationMaxCoalesceBodyBytes: 8388608
+    replicateReceiverQueueDepth: 1024
+    replicationTruncateStalePeerMultiplier: 2
+    replication:
+      mode: sync_quorum
+      ackTimeoutMs: 5000
+      syncQuorum:
+        minAcks: majority
   monitoring:
     enabled: true
     serviceMonitor: true

@@ -2977,21 +2977,20 @@ spec:
               chdb:
                 properties:
                   poolSize:
-                    default: 4
+                    default: 1
+                    description: |-
+                      Ignored by hyperbytedb (libchdb is a process-global singleton). Retained
+                      for API stability; always written as 1 in config.toml.
                     format: int32
                     type: integer
+                  sessionDataPath:
+                    description: |-
+                      chDB session directory inside the data volume. Defaults to
+                      /var/lib/hyperbytedb/chdb when unset.
+                    type: string
                 type: object
               cluster:
                 properties:
-                  antiEntropyEnabled:
-                    default: true
-                    description: When false, hyperbytedb does not run periodic Merkle
-                      verify / delta sync.
-                    type: boolean
-                  antiEntropyIntervalSecs:
-                    default: 60
-                    format: int32
-                    type: integer
                   heartbeatIntervalSecs:
                     default: 2
                     format: int32
@@ -3085,10 +3084,6 @@ spec:
                     format: int64
                     minimum: 0
                     type: integer
-                  syncMaxConcurrentFiles:
-                    default: 4
-                    format: int32
-                    type: integer
                   tls:
                     description: TLS for inter-node replication traffic.
                     properties:
@@ -3116,63 +3111,6 @@ spec:
                     required:
                     - enabled
                     type: object
-                  walReplicationEnabled:
-                    description: |-
-                      When false, WAL peer replication is disabled while metadata cluster
-                      features (Raft, membership sync) remain active.
-                    type: boolean
-                type: object
-              compaction:
-                properties:
-                  bucketDuration:
-                    description: |-
-                      Compaction time bucket. "1h" (hourly, default) or "1d" (daily). Daily
-                      buckets merge all 24 hourly files, reducing file count for wide-range queries.
-                    enum:
-                    - 1h
-                    - 1d
-                    - 24h
-                    type: string
-                  compactAllMaxInflight:
-                    description: Max concurrent measurement compactions when running
-                      compact_all.
-                    format: int32
-                    minimum: 0
-                    type: integer
-                  enabled:
-                    default: true
-                    type: boolean
-                  intervalSecs:
-                    default: 300
-                    format: int32
-                    type: integer
-                  maxRepairChecksPerCycle:
-                    description: |-
-                      Max bucket-hash comparisons (and repair attempts) per compaction tick for
-                      membership self-repair.
-                    format: int32
-                    minimum: 0
-                    type: integer
-                  minFilesToCompact:
-                    default: 4
-                    format: int32
-                    type: integer
-                  selfRepairEnabled:
-                    description: |-
-                      When true, periodically compare each active peer's manifest against local
-                      bucket hashes and fetch divergent or missing slices.
-                    type: boolean
-                  targetFileSizeMb:
-                    default: 256
-                    format: int32
-                    type: integer
-                  verifiedCompactionAgeSecs:
-                    description: |-
-                      Minimum age (seconds) before per-node files are hash-verified and merged
-                      into a single compacted file.
-                    format: int64
-                    minimum: 0
-                    type: integer
                 type: object
               failover:
                 description: FailoverSpec controls automatic failure detection and
@@ -3577,6 +3515,19 @@ spec:
                       More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                     type: object
                 type: object
+              retention:
+                description: RetentionSpec controls the background retention enforcement
+                  loop.
+                properties:
+                  enabled:
+                    default: true
+                    type: boolean
+                  interval:
+                    default: 60s
+                    description: How often retention scans run (humantime duration,
+                      e.g. "60s", "5m", "1h").
+                    type: string
+                type: object
               server:
                 properties:
                   maxBodySizeBytes:
@@ -3646,29 +3597,6 @@ spec:
                 type: object
               storage:
                 properties:
-                  backend:
-                    default: local
-                    enum:
-                    - local
-                    - s3
-                    type: string
-                  s3:
-                    properties:
-                      bucket:
-                        type: string
-                      credentialsSecretName:
-                        description: Reference to a Secret containing access_key_id
-                          and secret_access_key.
-                        type: string
-                      endpoint:
-                        type: string
-                      prefix:
-                        type: string
-                      region:
-                        type: string
-                    required:
-                    - bucket
-                    type: object
                   volumeClaimTemplate:
                     properties:
                       size:
