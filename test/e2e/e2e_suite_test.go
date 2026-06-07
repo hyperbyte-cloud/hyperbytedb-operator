@@ -31,7 +31,8 @@ import (
 )
 
 var (
-	managerImage = "hyperbytedb-operator:dev"
+	managerImage    = "hyperbytedb-operator:dev"
+	hyperbytedbImage  = "hyperbytedb:latest"
 )
 
 func TestE2E(t *testing.T) {
@@ -46,7 +47,20 @@ var _ = BeforeSuite(func() {
 	_, err := utils.Run(cmd)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the manager image")
 
+	By("building the hyperbytedb e2e stub image")
+	cmd = exec.Command("docker", "build",
+		"-t", hyperbytedbImage,
+		"-f", "hack/e2e/hyperbytedb-stub/Dockerfile",
+		"hack/e2e/hyperbytedb-stub",
+	)
+	_, err = utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build the hyperbytedb e2e stub image")
+
 	By("loading the manager image on Kind")
 	err = utils.LoadImageToKindClusterWithName(managerImage)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager image into Kind")
+
+	By("loading the hyperbytedb image on Kind")
+	err = utils.LoadImageToKindClusterWithName(hyperbytedbImage)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the hyperbytedb image into Kind")
 })

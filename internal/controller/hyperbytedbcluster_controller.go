@@ -172,6 +172,9 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// 6. StatefulSet
 	stsResult, err := r.reconcileStatefulSet(ctx, cluster, configHash)
 	if err != nil {
+		if apierrors.IsConflict(err) {
+			return ctrl.Result{Requeue: true}, nil
+		}
 		return r.setFailedStatus(ctx, cluster, "StatefulSetFailed", err)
 	}
 

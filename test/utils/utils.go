@@ -32,7 +32,7 @@ const (
 	certmanagerURLTmpl = "https://github.com/cert-manager/cert-manager/releases/download/%s/cert-manager.yaml"
 
 	defaultKindBinary  = "kind"
-	defaultKindCluster = "kind"
+	defaultKindCluster = "hyperbytedb-operator-test-e2e"
 )
 
 func warnError(err error) {
