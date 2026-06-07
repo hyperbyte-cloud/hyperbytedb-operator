@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -700,12 +701,8 @@ func (r *HyperbytedbClusterReconciler) reconcileProxy(ctx context.Context, clust
 	// annotation, and the Deployment would scale the new ReplicaSet back
 	// to zero — silently undoing the rollout.
 	mergedTemplateAnnotations := map[string]string{}
-	for k, v := range existingDep.Spec.Template.Annotations {
-		mergedTemplateAnnotations[k] = v
-	}
-	for k, v := range desiredDep.Spec.Template.Annotations {
-		mergedTemplateAnnotations[k] = v
-	}
+	maps.Copy(mergedTemplateAnnotations, existingDep.Spec.Template.Annotations)
+	maps.Copy(mergedTemplateAnnotations, desiredDep.Spec.Template.Annotations)
 	if len(mergedTemplateAnnotations) > 0 {
 		desiredDep.Spec.Template.Annotations = mergedTemplateAnnotations
 	}

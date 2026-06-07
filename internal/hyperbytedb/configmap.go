@@ -265,8 +265,8 @@ func writeClusterSection(b *strings.Builder, cluster *v1alpha1.HyperbytedbCluste
 	b.WriteString("\n[cluster]\n")
 	fmt.Fprintf(b, "enabled = %t\n", clusterEnabled)
 	b.WriteString("peers = \"\"\n")
-	b.WriteString(fmt.Sprintf("replication_log_dir = \"%s\"\n", defaultReplLogDir))
-	b.WriteString(fmt.Sprintf("raft_dir = \"%s\"\n", defaultRaftDir))
+	fmt.Fprintf(b, "replication_log_dir = \"%s\"\n", defaultReplLogDir)
+	fmt.Fprintf(b, "raft_dir = \"%s\"\n", defaultRaftDir)
 
 	heartbeatInterval := int32(2)
 	if spec.Cluster.HeartbeatIntervalSecs > 0 {

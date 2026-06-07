@@ -31,8 +31,8 @@ import (
 )
 
 var (
-	managerImage    = "hyperbytedb-operator:dev"
-	hyperbytedbImage  = "hyperbytedb:latest"
+	managerImage     = "hyperbytedb-operator:dev"
+	hyperbytedbImage = "hyperbytedb:latest"
 )
 
 func TestE2E(t *testing.T) {
