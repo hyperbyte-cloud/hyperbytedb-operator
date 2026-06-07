@@ -40,7 +40,7 @@ env:
 jobs:
   versions:
     name: Compute versions
-    runs-on: ubuntu-latest
+    runs-on: hyperbytedb-operator-controller
     outputs:
       chart_version: ${{ steps.compute.outputs.chart_version }}
       image_tag:     ${{ steps.compute.outputs.image_tag }}
@@ -65,7 +65,7 @@ jobs:
   image:
     name: Build & push operator image
     needs: versions
-    runs-on: ubuntu-latest
+    runs-on: hyperbytedb-operator-controller
     steps:
       - uses: actions/checkout@v4
 
@@ -93,7 +93,7 @@ jobs:
   chart:
     name: Package & push helm chart
     needs: [versions, image]
-    runs-on: ubuntu-latest
+    runs-on: hyperbytedb-operator-controller
     steps:
       - uses: actions/checkout@v4
 
@@ -146,7 +146,7 @@ jobs:
     name: GitHub Release
     needs: [versions, chart]
     if: needs.versions.outputs.is_release == 'true'
-    runs-on: ubuntu-latest
+    runs-on: hyperbytedb-operator-controller
     steps:
       - uses: actions/download-artifact@v4
         with:

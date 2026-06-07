@@ -13,7 +13,7 @@ permissions:
 jobs:
   lint:
     name: Lint
-    runs-on: ubuntu-latest
+    runs-on: hyperbytedb-operator-controller
     container:
       image: golang:1.25-bookworm
     steps:
