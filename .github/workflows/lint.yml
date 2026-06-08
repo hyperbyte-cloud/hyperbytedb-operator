@@ -28,6 +28,11 @@ jobs:
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Install CI dependencies
+        uses: ./.github/actions/install-ci-deps
+        with:
+          profile: golang-container
+
       - name: Check linter configuration
         run: make lint-config
       - name: Run linter
