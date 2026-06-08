@@ -1,27 +1,38 @@
 name: Tests
 
 on:
-  push:
   pull_request:
 
 concurrency:
   group: test-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Test
-    runs-on: self-hosted
-    container:
-      image: golang:1.25-bookworm
+    runs-on: hyperbytedb-operator-controller
     steps:
       - name: Clone the code
         uses: actions/checkout@v4
 
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: go.sum
+
       # Required so that `go list`/`go test` can run `git` for VCS stamping
-      # inside the container without hitting "dubious ownership" errors.
+      # without hitting "dubious ownership" errors.
       - name: Configure git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install CI dependencies
+        uses: ./.github/actions/install-ci-deps
+        with:
+          profile: k8s-runner
 
       - name: Running Tests
         run: |

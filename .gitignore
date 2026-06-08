@@ -28,3 +28,22 @@ go.work
 
 # Kubeconfig might contain secrets
 *.kubeconfig
+kubeconfig
+.kube/config
+
+# Local env and credential files
+.env
+.env.*
+!.env.example
+credentials.json
+*.pem
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+id_ed25519
+id_ed25519.*
+known_hosts
+
+# Stray native artifacts (not part of this Go operator)
+chdb.hpp

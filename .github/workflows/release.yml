@@ -40,9 +40,7 @@ env:
 jobs:
   versions:
     name: Compute versions
-    runs-on: self-hosted
-    container:
-      image: debian:bookworm-slim
+    runs-on: hyperbytedb-operator-controller
     outputs:
       chart_version: ${{ steps.compute.outputs.chart_version }}
       image_tag:     ${{ steps.compute.outputs.image_tag }}
@@ -67,22 +65,16 @@ jobs:
   image:
     name: Build & push operator image
     needs: versions
-    runs-on: self-hosted
-    container:
-      image: golang:1.25-bookworm
-      volumes:
-        - /var/run/docker.sock:/var/run/docker.sock
+    runs-on: hyperbytedb-operator-controller
     steps:
-      - name: Install Docker CLI
-        run: curl -fsSL https://get.docker.com | sh
-
       - uses: actions/checkout@v4
 
-      - name: Configure git safe directory
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
       - name: Login to GHCR
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build & push image
         env:
@@ -101,21 +93,16 @@ jobs:
   chart:
     name: Package & push helm chart
     needs: [versions, image]
-    runs-on: self-hosted
-    container:
-      image: alpine:3.20
+    runs-on: hyperbytedb-operator-controller
     steps:
-      - name: Install dependencies
-        run: apk add --no-cache bash ca-certificates curl git tar yq
-
-      - name: Install Helm
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-
       - uses: actions/checkout@v4
 
-      - name: Configure git safe directory
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Install CI dependencies
+        uses: ./.github/actions/install-ci-deps
+        with:
+          profile: k8s-runner
+          install_helm: "true"
+          install_yq: "true"
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
@@ -160,15 +147,8 @@ jobs:
     name: GitHub Release
     needs: [versions, chart]
     if: needs.versions.outputs.is_release == 'true'
-    runs-on: self-hosted
-    container:
-      image: debian:bookworm-slim
+    runs-on: hyperbytedb-operator-controller
     steps:
-      - name: Install dependencies
-        run: |
-          apt-get update
-          apt-get install -y ca-certificates curl
-
       - uses: actions/download-artifact@v4
         with:
           name: hyperbytedb-operator-chart

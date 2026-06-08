@@ -1,141 +1,49 @@
 name: Test Chart
 
 on:
-  push:
   pull_request:
 
 concurrency:
   group: test-chart-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   test-chart:
     name: Test Chart
-    runs-on: self-hosted
-    container:
-      image: golang:1.25-bookworm
-      volumes:
-        - /var/run/docker.sock:/var/run/docker.sock
+    runs-on: hyperbytedb-operator-controller
+    timeout-minutes: 30
     env:
       KIND_CLUSTER_NAME: hyperbytedb-chart-${{ github.run_id }}-${{ github.run_attempt }}
-      # Image tag is run-scoped so concurrent test-chart jobs sharing the host
-      # docker daemon don't race on `docker build -t <same-tag>` and load each
-      # other's half-built image into their kind cluster.
       OPERATOR_IMG: hyperbytedb-operator:ci-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
-      - name: Install Docker CLI
-        run: curl -fsSL https://get.docker.com | sh
-
       - name: Clone the code
         uses: actions/checkout@v4
 
-      - name: Configure git safe directory
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: go.sum
 
-      - name: Install kind
-        run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)
-          chmod +x ./kind
-          mv ./kind /usr/local/bin/kind
-
-      - name: Verify kind installation
-        run: kind version
-
-      - name: Install kubectl
-        run: |
-          ARCH=$(go env GOARCH)
-          KUBECTL_VERSION=$(curl -Ls https://dl.k8s.io/release/stable.txt)
-          curl -Lo ./kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${ARCH}/kubectl"
-          chmod +x ./kubectl
-          mv ./kubectl /usr/local/bin/kubectl
-          kubectl version --client
-
-      # Kind creates its node containers on the host's docker daemon, but the
-      # default kubeconfig points at 127.0.0.1, which is the *job container's*
-      # loopback (not the host's). We instead place the kind nodes on the same
-      # docker network as this job container and use the in-network kubeconfig
-      # so kubectl/helm can reach the API server by container hostname.
-      - name: Detect job container docker network
-        id: network
-        run: |
-          NETWORK=$(docker inspect "$(hostname)" \
-            --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' \
-            | head -n1)
-          if [ -z "$NETWORK" ]; then
-            echo "Failed to detect docker network for $(hostname)" >&2
-            exit 1
-          fi
-          echo "Detected network: $NETWORK"
-          echo "KIND_EXPERIMENTAL_DOCKER_NETWORK=$NETWORK" >> "$GITHUB_ENV"
-
-      # Reap obviously-stale kind clusters left behind by previous runs while
-      # leaving anything from a *concurrent* run untouched. Deleting another
-      # in-flight job's cluster races with its kubectl/helm calls and
-      # produces `dial tcp: lookup <cluster>-control-plane: no such host`
-      # failures mid-run.
-      #
-      # Rules:
-      #   * The default "kind" cluster is always safe to remove.
-      #   * Anything matching our run-scoped prefix (hyperbytedb-chart-*)
-      #     only gets removed if its control-plane container is older than
-      #     STALE_AFTER_SECONDS or the container is gone entirely (orphaned
-      #     kind metadata).
-      - name: Cleanup leftover chart kind clusters
-        env:
-          STALE_AFTER_SECONDS: "21600" # 6h
-        run: |
-          set -eu
-          NOW=$(date -u +%s)
-          for cluster in $(kind get clusters 2>/dev/null || true); do
-            case "$cluster" in
-              kind)
-                echo "Deleting default kind cluster: $cluster"
-                kind delete cluster --name "$cluster" || true
-                ;;
-              hyperbytedb-chart-*)
-                if [ "$cluster" = "$KIND_CLUSTER_NAME" ]; then
-                  continue
-                fi
-                started_at=$(docker inspect "${cluster}-control-plane" \
-                  --format '{{.State.StartedAt}}' 2>/dev/null || true)
-                if [ -z "$started_at" ]; then
-                  echo "Deleting orphaned kind cluster (no control-plane container): $cluster"
-                  kind delete cluster --name "$cluster" || true
-                  continue
-                fi
-                started_epoch=$(date -u -d "$started_at" +%s 2>/dev/null || echo 0)
-                age=$((NOW - started_epoch))
-                if [ "$age" -gt "$STALE_AFTER_SECONDS" ]; then
-                  echo "Deleting stale kind cluster (age=${age}s > ${STALE_AFTER_SECONDS}s): $cluster"
-                  kind delete cluster --name "$cluster" || true
-                else
-                  echo "Skipping recent kind cluster (age=${age}s, likely concurrent run): $cluster"
-                fi
-                ;;
-              *)
-                echo "Skipping unrelated kind cluster: $cluster"
-                ;;
-            esac
-          done
+      - name: Install CI dependencies
+        uses: ./.github/actions/install-ci-deps
+        with:
+          profile: k8s-runner
+          install_kind: "true"
+          install_kubectl: "true"
+          install_helm: "true"
 
       - name: Create kind cluster
         run: kind create cluster --name "$KIND_CLUSTER_NAME"
-
-      - name: Configure kubeconfig for in-network access
-        run: |
-          mkdir -p "$HOME/.kube"
-          kind get kubeconfig --name "$KIND_CLUSTER_NAME" --internal > "$HOME/.kube/config"
-          kubectl version || true
-          kubectl get nodes
 
       - name: Prepare hyperbytedb-operator
         run: |
           go mod tidy
           make docker-build IMG="$OPERATOR_IMG"
           kind load docker-image "$OPERATOR_IMG" --name "$KIND_CLUSTER_NAME"
-
-      - name: Install Helm
-        run: make install-helm
 
       - name: Lint Helm Chart
         run: helm lint ./dist/chart
@@ -149,10 +57,3 @@ jobs:
       - name: Cleanup kind cluster
         if: always()
         run: kind delete cluster --name "$KIND_CLUSTER_NAME" || true
-
-      # Remove the run-scoped operator image from the shared host docker
-      # daemon so we don't accumulate one image per CI run on the self-hosted
-      # runner.
-      - name: Cleanup operator image
-        if: always()
-        run: docker image rm -f "$OPERATOR_IMG" || true

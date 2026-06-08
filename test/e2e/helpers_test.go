@@ -17,10 +17,10 @@ metadata:
 spec:
   replicas: 1
   image: hyperbytedb:latest
+  imagePullPolicy: Never
   server:
     port: 8086
   storage:
-    backend: local
     volumeClaimTemplate:
       size: 1Gi
   logging:
@@ -47,10 +47,10 @@ metadata:
 spec:
   replicas: %d
   image: hyperbytedb:latest
+  imagePullPolicy: Never
   server:
     port: 8086
   storage:
-    backend: local
     volumeClaimTemplate:
       size: 1Gi
   logging:
