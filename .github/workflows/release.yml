@@ -3,25 +3,15 @@ name: Release
 # Builds and publishes the operator container image and the Helm chart to
 # GitHub Container Registry (GHCR / GitHub Packages).
 #
-#   * Tag push (v*.*.*)         -> stable release. Image is tagged
-#                                  `vX.Y.Z` (and `latest`), the chart is
-#                                  packaged with version=appVersion=X.Y.Z and
-#                                  pushed to oci://ghcr.io/<owner>/charts.
-#                                  A GitHub Release is also created with the
-#                                  packaged .tgz attached.
-#
-#   * Push to main              -> snapshot. Image is tagged `main-<sha>`,
-#                                  chart is packaged as `0.0.0-sha.<sha>` and
-#                                  pushed to the same OCI repo so PR/dev
-#                                  consumers can pull a known revision.
-#
 #   * workflow_dispatch         -> manual snapshot, same as a push to main.
 
 on:
-  push:
-    branches: [main]
-    tags: ["v*.*.*"]
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release"
+        required: true
+        default: "0.0.0"
 
 concurrency:
   group: release-${{ github.ref }}
@@ -50,17 +40,9 @@ jobs:
         id: compute
         run: |
           set -eu
-          if [ "${GITHUB_REF#refs/tags/}" != "$GITHUB_REF" ]; then
-            VERSION="${GITHUB_REF_NAME#v}"
-            echo "chart_version=$VERSION"   >> "$GITHUB_OUTPUT"
-            echo "image_tag=v$VERSION"      >> "$GITHUB_OUTPUT"
-            echo "is_release=true"          >> "$GITHUB_OUTPUT"
-          else
-            SHORT="$(echo "$GITHUB_SHA" | cut -c1-7)"
-            echo "chart_version=0.0.0-sha.${SHORT}" >> "$GITHUB_OUTPUT"
-            echo "image_tag=main-${SHORT}"          >> "$GITHUB_OUTPUT"
-            echo "is_release=false"                 >> "$GITHUB_OUTPUT"
-          fi
+          echo "chart_version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=v${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          echo "is_release=true" >> "$GITHUB_OUTPUT"
 
   image:
     name: Build & push operator image
