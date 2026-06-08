@@ -1,53 +1,36 @@
 name: Install CI dependencies
-description: Install system packages required by CI workflows
+description: Install system packages and tools for ARC/Kubernetes GitHub Actions runners
 
 inputs:
   profile:
-    description: Dependency set to install (golang-container or runner)
+    description: Dependency set to install (k8s-runner or golang-container)
     required: false
-    default: golang-container
+    default: k8s-runner
+  install_kind:
+    description: Install kind
+    required: false
+    default: "false"
+  install_kubectl:
+    description: Install kubectl
+    required: false
+    default: "false"
+  install_helm:
+    description: Install Helm
+    required: false
+    default: "false"
+  install_yq:
+    description: Install yq
+    required: false
+    default: "false"
 
 runs:
   using: composite
   steps:
     - name: Install dependencies
       shell: bash
-      run: |
-        set -euo pipefail
-
-        install_packages() {
-          if command -v apt-get >/dev/null 2>&1; then
-            apt-get update
-            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "$@"
-          elif command -v apk >/dev/null 2>&1; then
-            apk add --no-cache "$@"
-          else
-            echo "No supported package manager found (expected apt-get or apk)." >&2
-            exit 1
-          fi
-        }
-
-        case "${{ inputs.profile }}" in
-          golang-container)
-            # golang:*-bookworm is Debian-based but omits make; git/curl are used by
-            # the Makefile (go install, envtest, custom golangci-lint) and by Helm scripts.
-            install_packages make git curl ca-certificates
-            ;;
-          runner)
-            if ! command -v make >/dev/null 2>&1; then
-              if command -v apt-get >/dev/null 2>&1; then
-                sudo apt-get update
-                sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends make
-              elif command -v apk >/dev/null 2>&1; then
-                sudo apk add --no-cache make
-              else
-                echo "make is not installed and no supported package manager was found." >&2
-                exit 1
-              fi
-            fi
-            ;;
-          *)
-            echo "Unknown profile: ${{ inputs.profile }}" >&2
-            exit 1
-            ;;
-        esac
+      env:
+        INSTALL_KIND: ${{ inputs.install_kind }}
+        INSTALL_KUBECTL: ${{ inputs.install_kubectl }}
+        INSTALL_HELM: ${{ inputs.install_helm }}
+        INSTALL_YQ: ${{ inputs.install_yq }}
+      run: bash "${{ github.action_path }}/install-ci-deps.sh" "${{ inputs.profile }}"

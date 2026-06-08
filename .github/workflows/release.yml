@@ -97,11 +97,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Helm and yq
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-          sudo curl -Lo /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+      - name: Install CI dependencies
+        uses: ./.github/actions/install-ci-deps
+        with:
+          profile: k8s-runner
+          install_helm: "true"
+          install_yq: "true"
 
       - name: Login to GHCR
         run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login "$REGISTRY" -u "${{ github.actor }}" --password-stdin
