@@ -1,17 +1,21 @@
 name: Release
 
 # Builds and publishes the operator container image and the Helm chart to
-# GitHub Container Registry (GHCR / GitHub Packages).
+# GitHub Container Registry (GHCR / GitHub Packages), and creates the matching
+# GitHub Release.
 #
-#   * workflow_dispatch         -> manual snapshot, same as a push to main.
+#   * push tag v*       -> tagged release: image + chart + GitHub Release.
+#   * workflow_dispatch -> manual build/publish of image + chart (no GitHub Release).
 
 on:
+  push:
+    tags: ["v*"]
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to release"
+        description: "Version to release (without the leading v)"
         required: true
-        default: "0.0.0"
+        default: "0.1.2"
 
 concurrency:
   group: release-${{ github.ref }}
@@ -40,8 +44,16 @@ jobs:
         id: compute
         run: |
           set -eu
-          echo "chart_version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
-          echo "image_tag=v${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"     # e.g. v0.1.2
+            CHART_VERSION="${TAG#v}"          # 0.1.2 (chart/app versions are semver, no leading v)
+            IMAGE_TAG="$TAG"                  # v0.1.2
+          else
+            CHART_VERSION="${{ inputs.version }}"
+            IMAGE_TAG="v${{ inputs.version }}"
+          fi
+          echo "chart_version=$CHART_VERSION" >> "$GITHUB_OUTPUT"
+          echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
           echo "is_release=true" >> "$GITHUB_OUTPUT"
 
   image:
@@ -128,7 +140,7 @@ jobs:
   release:
     name: GitHub Release
     needs: [versions, chart]
-    if: needs.versions.outputs.is_release == 'true'
+    if: github.ref_type == 'tag'
     runs-on: hyperbytedb-operator-controller
     steps:
       - uses: actions/download-artifact@v4
@@ -138,6 +150,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
           generate_release_notes: true
           files: hyperbytedb-operator-*.tgz
           body: |

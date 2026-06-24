@@ -35,7 +35,7 @@ helm install hyperbytedb-operator \
 ```sh
 helm install hyperbytedb-operator \
   oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator \
-  --version 0.1.0 \
+  --version 0.1.2 \
   --namespace hyperbytedb-operator-system \
   --create-namespace
 ```
