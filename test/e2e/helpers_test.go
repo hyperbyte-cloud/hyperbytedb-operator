@@ -9,7 +9,7 @@ import (
 )
 
 func singleNodeCR(name string) *strings.Reader {
-	return strings.NewReader(fmt.Sprintf(`apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+	return strings.NewReader(fmt.Sprintf(`apiVersion: hyperbytedb.hyperbyte.cloud/v1alpha1
 kind: HyperbytedbCluster
 metadata:
   name: %s
@@ -39,7 +39,7 @@ spec:
 }
 
 func clusterCR(name string, replicas int) *strings.Reader {
-	return strings.NewReader(fmt.Sprintf(`apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+	return strings.NewReader(fmt.Sprintf(`apiVersion: hyperbytedb.hyperbyte.cloud/v1alpha1
 kind: HyperbytedbCluster
 metadata:
   name: %s
@@ -69,7 +69,7 @@ spec:
 }
 
 func backupCR(name, clusterName string) *strings.Reader {
-	return strings.NewReader(fmt.Sprintf(`apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+	return strings.NewReader(fmt.Sprintf(`apiVersion: hyperbytedb.hyperbyte.cloud/v1alpha1
 kind: HyperbytedbBackup
 metadata:
   name: %s
@@ -85,7 +85,7 @@ spec:
 }
 
 func restoreCR(name, clusterName, backupName string) *strings.Reader {
-	return strings.NewReader(fmt.Sprintf(`apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+	return strings.NewReader(fmt.Sprintf(`apiVersion: hyperbytedb.hyperbyte.cloud/v1alpha1
 kind: HyperbytedbRestore
 metadata:
   name: %s

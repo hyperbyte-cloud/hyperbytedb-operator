@@ -47,9 +47,9 @@ type HyperbytedbBackupReconciler struct {
 	Recorder record.EventRecorder
 }
 
-// +kubebuilder:rbac:groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbbackups,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbbackups/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbbackups/finalizers,verbs=update
+// +kubebuilder:rbac:groups=hyperbytedb.hyperbyte.cloud,resources=hyperbytedbbackups,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=hyperbytedb.hyperbyte.cloud,resources=hyperbytedbbackups/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=hyperbytedb.hyperbyte.cloud,resources=hyperbytedbbackups/finalizers,verbs=update
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=cronjobs,verbs=get;list;watch;create;update;patch;delete
 

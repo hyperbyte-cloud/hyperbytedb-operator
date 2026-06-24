@@ -1,4 +1,4 @@
-apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+apiVersion: hyperbytedb.hyperbyte.cloud/v1alpha1
 kind: HyperbytedbRestore
 metadata:
   name: hyperbytedb-restore-latest

@@ -1,31 +1,31 @@
-{{- if .Values.crd.enable }}
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    {{- if .Values.crd.keep }}
-    "helm.sh/resource-policy": keep
-    {{- end }}
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: hyperbytedbrestores.hyperbytedb.hyperbytedb.io
+  name: hyperbytedbbackups.hyperbytedb.hyperbyte.cloud
 spec:
-  group: hyperbytedb.hyperbytedb.io
+  group: hyperbytedb.hyperbyte.cloud
   names:
-    kind: HyperbytedbRestore
-    listKind: HyperbytedbRestoreList
-    plural: hyperbytedbrestores
-    singular: hyperbytedbrestore
+    kind: HyperbytedbBackup
+    listKind: HyperbytedbBackupList
+    plural: hyperbytedbbackups
+    singular: hyperbytedbbackup
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.clusterName
       name: Cluster
       type: string
-    - jsonPath: .spec.backupName
-      name: Backup
+    - jsonPath: .spec.schedule
+      name: Schedule
       type: string
     - jsonPath: .status.phase
       name: Phase
+      type: string
+    - jsonPath: .status.backupSize
+      name: Size
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -33,7 +33,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: HyperbytedbRestore is the Schema for the hyperbytedbrestores API.
+        description: HyperbytedbBackup is the Schema for the hyperbytedbbackups API.
         properties:
           apiVersion:
             description: |-
@@ -53,20 +53,18 @@ spec:
           metadata:
             type: object
           spec:
-            description: HyperbytedbRestoreSpec defines the desired state of HyperbytedbRestore.
+            description: HyperbytedbBackupSpec defines the desired state of HyperbytedbBackup.
             properties:
-              backupName:
-                minLength: 1
-                type: string
               clusterName:
                 minLength: 1
                 type: string
-              restoreTimestamp:
-                description: Optional RFC-3339 timestamp for point-in-time restore
-                  (future use).
-                format: date-time
-                type: string
-              source:
+              databases:
+                description: Restrict the backup to specific databases. Empty means
+                  all databases.
+                items:
+                  type: string
+                type: array
+              destination:
                 properties:
                   s3:
                     properties:
@@ -88,13 +86,28 @@ spec:
                 required:
                 - s3
                 type: object
+              retentionDays:
+                default: 7
+                format: int32
+                minimum: 1
+                type: integer
+              schedule:
+                description: Cron expression for scheduled backups. If empty, the
+                  backup is one-shot.
+                type: string
             required:
-            - backupName
             - clusterName
+            - destination
             type: object
           status:
-            description: HyperbytedbRestoreStatus defines the observed state of HyperbytedbRestore.
+            description: HyperbytedbBackupStatus defines the observed state of HyperbytedbBackup.
             properties:
+              backupPath:
+                description: S3 path where the backup was stored.
+                type: string
+              backupSize:
+                description: Human-readable backup size (e.g. "1.2 GiB").
+                type: string
               completionTime:
                 format: date-time
                 type: string
@@ -157,20 +170,18 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              lastCleanupTime:
+                format: date-time
+                type: string
               phase:
                 default: Pending
-                description: RestorePhase represents the lifecycle phase of a restore.
+                description: BackupPhase represents the lifecycle phase of a backup.
                 enum:
                 - Pending
-                - ScalingDown
-                - Restoring
+                - Running
                 - Completed
                 - Failed
                 type: string
-              restoredPVCs:
-                description: Number of PVCs restored (relevant in cluster mode).
-                format: int32
-                type: integer
               startTime:
                 format: date-time
                 type: string
@@ -182,4 +193,3 @@ spec:
     storage: true
     subresources:
       status: {}
-{{- end }}

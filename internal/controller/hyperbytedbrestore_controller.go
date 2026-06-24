@@ -48,11 +48,11 @@ type HyperbytedbRestoreReconciler struct {
 	Recorder record.EventRecorder
 }
 
-// +kubebuilder:rbac:groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbrestores,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbrestores/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbrestores/finalizers,verbs=update
-// +kubebuilder:rbac:groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbclusters,verbs=get;list;watch
-// +kubebuilder:rbac:groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbbackups,verbs=get;list;watch
+// +kubebuilder:rbac:groups=hyperbytedb.hyperbyte.cloud,resources=hyperbytedbrestores,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=hyperbytedb.hyperbyte.cloud,resources=hyperbytedbrestores/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=hyperbytedb.hyperbyte.cloud,resources=hyperbytedbrestores/finalizers,verbs=update
+// +kubebuilder:rbac:groups=hyperbytedb.hyperbyte.cloud,resources=hyperbytedbclusters,verbs=get;list;watch
+// +kubebuilder:rbac:groups=hyperbytedb.hyperbyte.cloud,resources=hyperbytedbbackups,verbs=get;list;watch
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;delete
 

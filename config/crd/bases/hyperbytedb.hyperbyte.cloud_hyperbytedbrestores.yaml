@@ -4,28 +4,25 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: hyperbytedbbackups.hyperbytedb.hyperbytedb.io
+  name: hyperbytedbrestores.hyperbytedb.hyperbyte.cloud
 spec:
-  group: hyperbytedb.hyperbytedb.io
+  group: hyperbytedb.hyperbyte.cloud
   names:
-    kind: HyperbytedbBackup
-    listKind: HyperbytedbBackupList
-    plural: hyperbytedbbackups
-    singular: hyperbytedbbackup
+    kind: HyperbytedbRestore
+    listKind: HyperbytedbRestoreList
+    plural: hyperbytedbrestores
+    singular: hyperbytedbrestore
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.clusterName
       name: Cluster
       type: string
-    - jsonPath: .spec.schedule
-      name: Schedule
+    - jsonPath: .spec.backupName
+      name: Backup
       type: string
     - jsonPath: .status.phase
       name: Phase
-      type: string
-    - jsonPath: .status.backupSize
-      name: Size
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -33,7 +30,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: HyperbytedbBackup is the Schema for the hyperbytedbbackups API.
+        description: HyperbytedbRestore is the Schema for the hyperbytedbrestores
+          API.
         properties:
           apiVersion:
             description: |-
@@ -53,18 +51,20 @@ spec:
           metadata:
             type: object
           spec:
-            description: HyperbytedbBackupSpec defines the desired state of HyperbytedbBackup.
+            description: HyperbytedbRestoreSpec defines the desired state of HyperbytedbRestore.
             properties:
+              backupName:
+                minLength: 1
+                type: string
               clusterName:
                 minLength: 1
                 type: string
-              databases:
-                description: Restrict the backup to specific databases. Empty means
-                  all databases.
-                items:
-                  type: string
-                type: array
-              destination:
+              restoreTimestamp:
+                description: Optional RFC-3339 timestamp for point-in-time restore
+                  (future use).
+                format: date-time
+                type: string
+              source:
                 properties:
                   s3:
                     properties:
@@ -86,28 +86,13 @@ spec:
                 required:
                 - s3
                 type: object
-              retentionDays:
-                default: 7
-                format: int32
-                minimum: 1
-                type: integer
-              schedule:
-                description: Cron expression for scheduled backups. If empty, the
-                  backup is one-shot.
-                type: string
             required:
+            - backupName
             - clusterName
-            - destination
             type: object
           status:
-            description: HyperbytedbBackupStatus defines the observed state of HyperbytedbBackup.
+            description: HyperbytedbRestoreStatus defines the observed state of HyperbytedbRestore.
             properties:
-              backupPath:
-                description: S3 path where the backup was stored.
-                type: string
-              backupSize:
-                description: Human-readable backup size (e.g. "1.2 GiB").
-                type: string
               completionTime:
                 format: date-time
                 type: string
@@ -170,18 +155,20 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              lastCleanupTime:
-                format: date-time
-                type: string
               phase:
                 default: Pending
-                description: BackupPhase represents the lifecycle phase of a backup.
+                description: RestorePhase represents the lifecycle phase of a restore.
                 enum:
                 - Pending
-                - Running
+                - ScalingDown
+                - Restoring
                 - Completed
                 - Failed
                 type: string
+              restoredPVCs:
+                description: Number of PVCs restored (relevant in cluster mode).
+                format: int32
+                type: integer
               startTime:
                 format: date-time
                 type: string

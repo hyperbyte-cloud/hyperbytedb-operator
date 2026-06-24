@@ -4,9 +4,9 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: hyperbytedbclusters.hyperbytedb.hyperbytedb.io
+  name: hyperbytedbclusters.hyperbytedb.hyperbyte.cloud
 spec:
-  group: hyperbytedb.hyperbytedb.io
+  group: hyperbytedb.hyperbyte.cloud
   names:
     kind: HyperbytedbCluster
     listKind: HyperbytedbClusterList

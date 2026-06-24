@@ -10,12 +10,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /mutate-hyperbytedb-hyperbytedb-io-v1alpha1-hyperbytedbcluster
+      path: /mutate-hyperbytedb-hyperbyte-cloud-v1alpha1-hyperbytedbcluster
   failurePolicy: Fail
   name: mhyperbytedbcluster.kb.io
   rules:
   - apiGroups:
-    - hyperbytedb.hyperbytedb.io
+    - hyperbytedb.hyperbyte.cloud
     apiVersions:
     - v1alpha1
     operations:
@@ -36,12 +36,12 @@ webhooks:
     service:
       name: webhook-service
       namespace: system
-      path: /validate-hyperbytedb-hyperbytedb-io-v1alpha1-hyperbytedbcluster
+      path: /validate-hyperbytedb-hyperbyte-cloud-v1alpha1-hyperbytedbcluster
   failurePolicy: Fail
   name: vhyperbytedbcluster.kb.io
   rules:
   - apiGroups:
-    - hyperbytedb.hyperbytedb.io
+    - hyperbytedb.hyperbyte.cloud
     apiVersions:
     - v1alpha1
     operations:

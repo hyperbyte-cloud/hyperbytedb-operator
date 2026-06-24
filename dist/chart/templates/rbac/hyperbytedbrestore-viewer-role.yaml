@@ -10,7 +10,7 @@ metadata:
   name: {{ include "hyperbytedb-operator.resourceName" (dict "suffix" "hyperbytedbrestore-viewer-role" "context" $) }}
 rules:
 - apiGroups:
-  - hyperbytedb.hyperbytedb.io
+  - hyperbytedb.hyperbyte.cloud
   resources:
   - hyperbytedbrestores
   verbs:
@@ -18,7 +18,7 @@ rules:
   - list
   - watch
 - apiGroups:
-  - hyperbytedb.hyperbytedb.io
+  - hyperbytedb.hyperbyte.cloud
   resources:
   - hyperbytedbrestores/status
   verbs:
