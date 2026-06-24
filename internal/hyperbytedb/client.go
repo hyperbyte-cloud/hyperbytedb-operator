@@ -108,7 +108,9 @@ func (c *Client) DrainNode(ctx context.Context, host string, port int32) error {
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+	if resp.StatusCode != http.StatusOK &&
+		resp.StatusCode != http.StatusNoContent &&
+		resp.StatusCode != http.StatusAccepted {
 		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("drain returned %d: %s", resp.StatusCode, string(respBody))
 	}

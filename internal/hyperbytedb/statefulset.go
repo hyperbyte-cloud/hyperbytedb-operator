@@ -14,6 +14,15 @@ import (
 	v1alpha1 "github.com/hyperbyte-cloud/hyperbytedb-operator/api/v1alpha1"
 )
 
+const (
+	// drainAckWaitSecs mirrors hyperbytedb DrainService::wait_for_replication_acks
+	// max_wait. preStop must outlive that window so the pod is not SIGKILL'd mid-drain.
+	drainAckWaitSecs = 90
+	// podTerminationGraceSecs is the kubelet grace budget (includes preStop). Keep
+	// comfortably above drainAckWaitSecs + headroom for flush + SIGTERM cleanup.
+	podTerminationGraceSecs = 120
+)
+
 func StatefulSetName(cluster *v1alpha1.HyperbytedbCluster) string {
 	return cluster.Name
 }
@@ -30,10 +39,7 @@ func BuildStatefulSet(cluster *v1alpha1.HyperbytedbCluster, configHash string) *
 	clusterEnabled := replicas > 1
 	headlessSvc := HeadlessServiceName(cluster)
 
-	image := cluster.Spec.Image
-	if image == "" {
-		image = "hyperbytedb:latest"
-	}
+	image := ResolveHyperbytedbImage(cluster)
 
 	pullPolicy := cluster.Spec.ImagePullPolicy
 	if pullPolicy == "" {
@@ -138,10 +144,6 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		{Name: "HYPERBYTEDB__STORAGE__META_DIR", Value: defaultMetaDir},
 		{Name: "HYPERBYTEDB__CHDB__SESSION_DATA_PATH", Value: chdbPath},
 	}
-	if cluster.Spec.Logging.OtlpEndpoint != "" {
-		env = append(env, corev1.EnvVar{Name: "OTEL_SERVICE_NAME", Value: cluster.Name})
-	}
-
 	// Cluster mode and paths come from mounted config.toml (hot-updated on scale);
 	// avoid replica-dependent env vars so the pod template stays stable across scale events.
 
@@ -195,6 +197,28 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		TimeoutSeconds:      3,
 	}
 
+	// Startup can be slow on a node with large series cardinality or a cold
+	// chDB that must be rebuilt from the WAL: the HTTP listener only binds
+	// after the dedup-cache warm and startup WAL replay complete. Without a
+	// startup probe, the liveness probe (15s delay + 3×10s) fires at ~35s and
+	// SIGKILLs the pod mid-warm, which restarts and re-does the same heavy
+	// work — a self-amplifying CPU/memory loop. The startup probe holds
+	// liveness off until /ping first answers, giving the listener up to
+	// FailureThreshold×PeriodSeconds (600s) to come up before any restart.
+	startupProbe := &corev1.Probe{
+		ProbeHandler: corev1.ProbeHandler{
+			HTTPGet: &corev1.HTTPGetAction{
+				Path:   "/ping",
+				Port:   intstr.FromString("http"),
+				Scheme: probeScheme,
+			},
+		},
+		InitialDelaySeconds: 5,
+		PeriodSeconds:       5,
+		TimeoutSeconds:      3,
+		FailureThreshold:    120,
+	}
+
 	// --------------- main container ---------------
 	mainContainer := corev1.Container{
 		Name:            "hyperbytedb",
@@ -210,6 +234,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 			},
 		},
 		VolumeMounts:   volumeMounts,
+		StartupProbe:   startupProbe,
 		LivenessProbe:  livenessProbe,
 		ReadinessProbe: readinessProbe,
 		Resources:      cluster.Spec.Resources,
@@ -219,8 +244,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		mainContainer.Lifecycle = &corev1.Lifecycle{
 			PreStop: &corev1.LifecycleHandler{
 				Exec: &corev1.ExecAction{
-					Command: []string{"sh", "-c",
-						fmt.Sprintf("curl -sf -X POST http://localhost:%d/internal/drain || true; sleep 45", port)},
+					Command: []string{"sh", "-c", clusterPreStopScript(port)},
 				},
 			},
 		}
@@ -258,7 +282,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 
 	// --------------- pod spec ---------------
 	podSpec := corev1.PodSpec{
-		TerminationGracePeriodSeconds: ptr.To(int64(60)),
+		TerminationGracePeriodSeconds: ptr.To(int64(podTerminationGraceSecs)),
 		ImagePullSecrets:              cluster.Spec.ImagePullSecrets,
 		InitContainers:                initContainers,
 		Containers:                    []corev1.Container{mainContainer},
@@ -334,4 +358,19 @@ func podManagementPolicy(clusterEnabled bool) appsv1.PodManagementPolicyType {
 		return appsv1.OrderedReadyPodManagement
 	}
 	return appsv1.ParallelPodManagement
+}
+
+// clusterPreStopScript initiates graceful drain and blocks until the node
+// reports state=leaving (flush + replication acks + peer leave complete) or
+// until drainAckWaitSecs elapses. A fixed sleep is insufficient because
+// DrainService may wait up to 60s for peer replication acks alone.
+func clusterPreStopScript(port int32) string {
+	return fmt.Sprintf(`curl -sf -X POST http://localhost:%[1]d/internal/drain || true
+for i in $(seq 1 %[2]d); do
+  if curl -sf http://localhost:%[1]d/cluster/metrics 2>/dev/null | grep -q '"state":"leaving"'; then
+    exit 0
+  fi
+  sleep 1
+done
+exit 0`, port, drainAckWaitSecs)
 }

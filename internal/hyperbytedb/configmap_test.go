@@ -31,7 +31,9 @@ func TestRenderConfigTOML_singleNode(t *testing.T) {
 		"[cluster]",
 		"enabled = false",
 		"[retention]",
-		`interval = "60s"`,
+		`interval = "12h"`,
+		`wal_format = "bincode"`,
+		"arrow_wal_enabled = true",
 	} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected config to contain %q\n\ngot:\n%s", want, out)

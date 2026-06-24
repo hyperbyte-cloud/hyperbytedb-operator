@@ -207,10 +207,7 @@ func (r *HyperbytedbBackupReconciler) reconcileCronJob(ctx context.Context, back
 }
 
 func (r *HyperbytedbBackupReconciler) buildBackupJob(backup *hyperbytedbv1alpha1.HyperbytedbBackup, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, name string) *batchv1.Job {
-	image := cluster.Spec.Image
-	if image == "" {
-		image = "hyperbytedb:latest"
-	}
+	image := hyperbytedb.ResolveHyperbytedbImage(cluster)
 
 	s3 := backup.Spec.Destination.S3
 	s3Path := r.buildBackupS3Path(backup)

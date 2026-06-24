@@ -26,9 +26,13 @@ func ProxyServiceName(cluster *v1alpha1.HyperbytedbCluster) string {
 	return cluster.Name + "-proxy"
 }
 
-// ProxyEnabled reports whether the user opted-in to proxy reconciliation.
+// ProxyEnabled reports whether the operator should reconcile proxy resources.
+// The proxy is enabled by default; set spec.proxy.enabled=false to opt out.
 func ProxyEnabled(cluster *v1alpha1.HyperbytedbCluster) bool {
-	return cluster.Spec.Proxy != nil && cluster.Spec.Proxy.Enabled
+	if cluster.Spec.Proxy == nil {
+		return true
+	}
+	return cluster.Spec.Proxy.Enabled
 }
 
 // proxyLabels intentionally uses `name=hyperbytedb-proxy` instead of
@@ -106,10 +110,7 @@ func BuildProxyDeployment(cluster *v1alpha1.HyperbytedbCluster) *appsv1.Deployme
 		replicas = *spec.Replicas
 	}
 
-	image := spec.Image
-	if image == "" {
-		image = "hyperbytedb-proxy:latest"
-	}
+	image := ResolveProxyImage(cluster)
 	pullPolicy := spec.ImagePullPolicy
 	if pullPolicy == "" {
 		pullPolicy = corev1.PullIfNotPresent
@@ -120,7 +121,7 @@ func BuildProxyDeployment(cluster *v1alpha1.HyperbytedbCluster) *appsv1.Deployme
 	backendService := fmt.Sprintf("%s.%s.svc.cluster.local",
 		HeadlessServiceName(cluster), cluster.Namespace)
 
-	holdSecs := int32(10)
+	holdSecs := int32(30)
 	if spec.HoldTimeoutSecs > 0 {
 		holdSecs = spec.HoldTimeoutSecs
 	}

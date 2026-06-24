@@ -43,10 +43,6 @@ func (w *HyperbytedbClusterWebhook) Default(_ context.Context, obj *HyperbytedbC
 		obj.Spec.Replicas = ptr.To(int32(1))
 	}
 
-	if obj.Spec.Image == "" {
-		obj.Spec.Image = "hyperbytedb:latest"
-	}
-
 	if obj.Spec.Server.Port == 0 {
 		obj.Spec.Server.Port = 8086
 	}
@@ -82,6 +78,12 @@ func (w *HyperbytedbClusterWebhook) Default(_ context.Context, obj *HyperbytedbC
 
 	if obj.Spec.Retention.Interval == "" {
 		obj.Spec.Retention.Interval = "60s"
+	}
+
+	// hyperbytedb-proxy is enabled by default for health-aware routing during
+	// rolling upgrades. Opt out with spec.proxy.enabled=false.
+	if obj.Spec.Proxy == nil {
+		obj.Spec.Proxy = &ProxySpec{Enabled: true}
 	}
 
 	return nil

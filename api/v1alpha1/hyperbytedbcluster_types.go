@@ -29,9 +29,15 @@ type HyperbytedbClusterSpec struct {
 	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty"`
 
-	// +kubebuilder:default="hyperbytedb:latest"
+	// Container image reference. When set with a tag (contains ':'), used as-is.
+	// When set without a tag, treated as the repository and combined with Version.
+	// When empty, defaults to hyperbytedb:{Version} or hyperbytedb:latest.
+	// +optional
 	Image string `json:"image,omitempty"`
 
+	// Application version. Drives the container image tag for hyperbytedb and
+	// hyperbytedb-proxy (e.g. version "0.8.3" → hyperbytedb:v0.8.3). Changing
+	// this field triggers a rolling upgrade.
 	// +optional
 	Version string `json:"version,omitempty"`
 
@@ -169,6 +175,12 @@ type CertManagerIssuerRef struct {
 type StorageSpec struct {
 	// +optional
 	VolumeClaimTemplate *PersistentVolumeClaimSpec `json:"volumeClaimTemplate,omitempty"`
+
+	// WAL encoding format: "bincode" (default) or "arrow_ipc".
+	// +optional
+	// +kubebuilder:validation:Enum=bincode;arrow_ipc
+	// +kubebuilder:default="bincode"
+	WALFormat string `json:"walFormat,omitempty"`
 }
 
 type PersistentVolumeClaimSpec struct {
@@ -204,6 +216,11 @@ type FlushSpec struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	WALBatchDelayUs int64 `json:"walBatchDelayUs,omitempty"`
+
+	// Keep chDB-ready Arrow batches in an in-memory WAL cache for zero-copy flush.
+	// +optional
+	// +kubebuilder:default=true
+	ArrowWALEnabled *bool `json:"arrowWALEnabled,omitempty"`
 }
 
 type ChDBSpec struct {
@@ -235,18 +252,6 @@ type LoggingSpec struct {
 	// +kubebuilder:default="text"
 	// +kubebuilder:validation:Enum=text;json
 	Format string `json:"format,omitempty"`
-
-	// Emit per-phase performance logs (write/query/flush). Off by default.
-	// +optional
-	DetailedTrace *bool `json:"detailedTrace,omitempty"`
-
-	// OTLP HTTP endpoint for trace export (e.g. http://alloy-logs:4318).
-	// +optional
-	OtlpEndpoint string `json:"otlpEndpoint,omitempty"`
-
-	// Fraction of traces exported to OTLP (0.0–1.0). Default 1.0 when OTLP is set.
-	// +optional
-	OtlpSampleRatio string `json:"otlpSampleRatio,omitempty"`
 }
 
 type ClusterTuningSpec struct {
@@ -447,7 +452,7 @@ type ProxySpec struct {
 	// When false, the operator does not create or reconcile any proxy
 	// resources. Existing proxy Deployment/Service (if any) are left alone
 	// so they can be cleaned up out-of-band.
-	// +kubebuilder:default=false
+	// +kubebuilder:default=true
 	Enabled bool `json:"enabled"`
 
 	// +kubebuilder:default="hyperbytedb-proxy:latest"
@@ -479,7 +484,7 @@ type ProxySpec struct {
 	// request with 503. Bigger values mean rolling restarts are smoother but
 	// individual stuck requests sit longer.
 	// +optional
-	// +kubebuilder:default=10
+	// +kubebuilder:default=30
 	// +kubebuilder:validation:Minimum=0
 	HoldTimeoutSecs int32 `json:"holdTimeoutSecs,omitempty"`
 
