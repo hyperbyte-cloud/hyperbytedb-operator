@@ -1,7 +1,7 @@
 # This rule is not used by the project hyperbytedb-operator itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants full permissions ('*') over hyperbytedb.hyperbytedb.io.
+# Grants full permissions ('*') over hyperbytedb.hyperbyte.cloud.
 # This role is intended for users authorized to modify roles and bindings within the cluster,
 # enabling them to delegate specific permissions to other users or groups as needed.
 
@@ -14,13 +14,13 @@ metadata:
   name: hyperbytedbbackup-admin-role
 rules:
 - apiGroups:
-  - hyperbytedb.hyperbytedb.io
+  - hyperbytedb.hyperbyte.cloud
   resources:
   - hyperbytedbbackups
   verbs:
   - '*'
 - apiGroups:
-  - hyperbytedb.hyperbytedb.io
+  - hyperbytedb.hyperbyte.cloud
   resources:
   - hyperbytedbbackups/status
   verbs:

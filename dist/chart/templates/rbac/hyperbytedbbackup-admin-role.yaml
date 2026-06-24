@@ -10,13 +10,13 @@ metadata:
   name: {{ include "hyperbytedb-operator.resourceName" (dict "suffix" "hyperbytedbbackup-admin-role" "context" $) }}
 rules:
 - apiGroups:
-  - hyperbytedb.hyperbytedb.io
+  - hyperbytedb.hyperbyte.cloud
   resources:
   - hyperbytedbbackups
   verbs:
   - '*'
 - apiGroups:
-  - hyperbytedb.hyperbytedb.io
+  - hyperbytedb.hyperbyte.cloud
   resources:
   - hyperbytedbbackups/status
   verbs:

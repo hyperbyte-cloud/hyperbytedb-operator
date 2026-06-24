@@ -1,12 +1,15 @@
----
+{{- if .Values.crd.enable }}
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
+    {{- if .Values.crd.keep }}
+    "helm.sh/resource-policy": keep
+    {{- end }}
     controller-gen.kubebuilder.io/version: v0.20.1
-  name: hyperbytedbrestores.hyperbytedb.hyperbytedb.io
+  name: hyperbytedbrestores.hyperbytedb.hyperbyte.cloud
 spec:
-  group: hyperbytedb.hyperbytedb.io
+  group: hyperbytedb.hyperbyte.cloud
   names:
     kind: HyperbytedbRestore
     listKind: HyperbytedbRestoreList
@@ -30,8 +33,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: HyperbytedbRestore is the Schema for the hyperbytedbrestores
-          API.
+        description: HyperbytedbRestore is the Schema for the hyperbytedbrestores API.
         properties:
           apiVersion:
             description: |-
@@ -180,3 +182,4 @@ spec:
     storage: true
     subresources:
       status: {}
+{{- end }}
