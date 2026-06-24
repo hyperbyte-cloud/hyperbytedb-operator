@@ -36,7 +36,7 @@ func SetupHyperbytedbClusterWebhookWithManager(mgr ctrl.Manager) error {
 		Complete()
 }
 
-// +kubebuilder:webhook:path=/mutate-hyperbytedb-hyperbytedb-io-v1alpha1-hyperbytedbcluster,mutating=true,failurePolicy=fail,sideEffects=None,groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbclusters,verbs=create;update,versions=v1alpha1,name=mhyperbytedbcluster.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/mutate-hyperbytedb-hyperbytedb-io-v1alpha1-hyperbytedbcluster,mutating=true,failurePolicy=fail,sideEffects=None,groups=hyperbytedb.hyperbyte.cloud,resources=hyperbytedbclusters,verbs=create;update,versions=v1alpha1,name=mhyperbytedbcluster.kb.io,admissionReviewVersions=v1
 
 func (w *HyperbytedbClusterWebhook) Default(_ context.Context, obj *HyperbytedbCluster) error {
 	if obj.Spec.Replicas == nil {
@@ -89,7 +89,7 @@ func (w *HyperbytedbClusterWebhook) Default(_ context.Context, obj *HyperbytedbC
 	return nil
 }
 
-// +kubebuilder:webhook:path=/validate-hyperbytedb-hyperbytedb-io-v1alpha1-hyperbytedbcluster,mutating=false,failurePolicy=fail,sideEffects=None,groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbclusters,verbs=create;update,versions=v1alpha1,name=vhyperbytedbcluster.kb.io,admissionReviewVersions=v1
+// +kubebuilder:webhook:path=/validate-hyperbytedb-hyperbytedb-io-v1alpha1-hyperbytedbcluster,mutating=false,failurePolicy=fail,sideEffects=None,groups=hyperbytedb.hyperbyte.cloud,resources=hyperbytedbclusters,verbs=create;update,versions=v1alpha1,name=vhyperbytedbcluster.kb.io,admissionReviewVersions=v1
 
 func (w *HyperbytedbClusterWebhook) ValidateCreate(_ context.Context, obj *HyperbytedbCluster) (admission.Warnings, error) {
 	return validateCluster(obj)

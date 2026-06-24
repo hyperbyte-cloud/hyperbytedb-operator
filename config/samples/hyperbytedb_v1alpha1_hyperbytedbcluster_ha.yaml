@@ -1,4 +1,4 @@
-apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+apiVersion: hyperbytedb.hyperbyte.cloud/v1alpha1
 kind: HyperbytedbCluster
 metadata:
   name: hyperbytedb-ha

@@ -15,7 +15,7 @@ webhooks:
   name: mhyperbytedbcluster.kb.io
   rules:
   - apiGroups:
-    - hyperbytedb.hyperbytedb.io
+    - hyperbytedb.hyperbyte.cloud
     apiVersions:
     - v1alpha1
     operations:
@@ -41,7 +41,7 @@ webhooks:
   name: vhyperbytedbcluster.kb.io
   rules:
   - apiGroups:
-    - hyperbytedb.hyperbytedb.io
+    - hyperbytedb.hyperbyte.cloud
     apiVersions:
     - v1alpha1
     operations:

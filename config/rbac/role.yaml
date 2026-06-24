@@ -74,7 +74,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - hyperbytedb.hyperbytedb.io
+  - hyperbytedb.hyperbyte.cloud
   resources:
   - hyperbytedbbackups
   - hyperbytedbclusters
@@ -88,7 +88,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - hyperbytedb.hyperbytedb.io
+  - hyperbytedb.hyperbyte.cloud
   resources:
   - hyperbytedbbackups/finalizers
   - hyperbytedbclusters/finalizers
@@ -96,7 +96,7 @@ rules:
   verbs:
   - update
 - apiGroups:
-  - hyperbytedb.hyperbytedb.io
+  - hyperbytedb.hyperbyte.cloud
   resources:
   - hyperbytedbbackups/status
   - hyperbytedbclusters/status

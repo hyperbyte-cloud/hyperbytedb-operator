@@ -277,7 +277,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 	podAnnotations := make(map[string]string)
 	maps.Copy(podAnnotations, cluster.Spec.PodAnnotations)
 	if configHash != "" {
-		podAnnotations["hyperbytedb.hyperbytedb.io/config-hash"] = configHash
+		podAnnotations["hyperbytedb.hyperbyte.cloud/config-hash"] = configHash
 	}
 
 	// --------------- pod spec ---------------

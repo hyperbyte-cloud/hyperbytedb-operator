@@ -92,9 +92,9 @@ explicitly:
 
 ```sh
 kubectl delete crd \
-  hyperbytedbclusters.hyperbytedb.hyperbytedb.io \
-  hyperbytedbbackups.hyperbytedb.hyperbytedb.io \
-  hyperbytedbrestores.hyperbytedb.hyperbytedb.io
+  hyperbytedbclusters.hyperbytedb.hyperbyte.cloud \
+  hyperbytedbbackups.hyperbytedb.hyperbyte.cloud \
+  hyperbytedbrestores.hyperbytedb.hyperbyte.cloud
 ```
 
 ### Install from source (development)
@@ -113,7 +113,7 @@ helm install hyperbytedb-operator dist/chart \
 ## Deploy a Cluster
 
 ```yaml
-apiVersion: hyperbytedb.hyperbytedb.io/v1alpha1
+apiVersion: hyperbytedb.hyperbyte.cloud/v1alpha1
 kind: HyperbytedbCluster
 metadata:
   name: my-cluster

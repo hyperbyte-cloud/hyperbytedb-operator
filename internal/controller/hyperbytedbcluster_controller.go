@@ -43,7 +43,7 @@ import (
 	"github.com/hyperbyte-cloud/hyperbytedb-operator/internal/hyperbytedb"
 )
 
-const clusterFinalizer = "hyperbytedb.hyperbytedb.io/finalizer"
+const clusterFinalizer = "hyperbytedb.hyperbyte.cloud/finalizer"
 
 // replicationStateHealthy is the ReplicationState value reported when all
 // nodes are within tolerance of each other on parquet file count.
@@ -57,9 +57,9 @@ type HyperbytedbClusterReconciler struct {
 	Members  *hyperbytedb.MemberManager
 }
 
-// +kubebuilder:rbac:groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbclusters,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbclusters/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=hyperbytedb.hyperbytedb.io,resources=hyperbytedbclusters/finalizers,verbs=update
+// +kubebuilder:rbac:groups=hyperbytedb.hyperbyte.cloud,resources=hyperbytedbclusters,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=hyperbytedb.hyperbyte.cloud,resources=hyperbytedbclusters/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=hyperbytedb.hyperbyte.cloud,resources=hyperbytedbclusters/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
