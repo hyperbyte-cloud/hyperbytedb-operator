@@ -246,10 +246,7 @@ func (r *HyperbytedbRestoreReconciler) buildRestoreJob(
 	s3Source *hyperbytedbv1alpha1.S3BackupSpec,
 	ordinal int32,
 ) *batchv1.Job {
-	image := cluster.Spec.Image
-	if image == "" {
-		image = "hyperbytedb:latest"
-	}
+	image := hyperbytedb.ResolveHyperbytedbImage(cluster)
 
 	s3Path := s3Source.Bucket
 	if s3Source.Prefix != "" {

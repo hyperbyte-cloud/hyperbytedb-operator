@@ -66,7 +66,7 @@ func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, cl
 	var b strings.Builder
 
 	writeServerSection(&b, spec)
-	writeStorageSection(&b)
+	writeStorageSection(&b, spec)
 	writeFlushSection(&b, spec)
 	writeChdbSection(&b, spec)
 	writeAuthSection(&b, spec)
@@ -108,10 +108,15 @@ func writeServerSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpe
 	}
 }
 
-func writeStorageSection(b *strings.Builder) {
+func writeStorageSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
 	b.WriteString("\n[storage]\n")
 	fmt.Fprintf(b, "wal_dir = \"%s\"\n", defaultWalDir)
 	fmt.Fprintf(b, "meta_dir = \"%s\"\n", defaultMetaDir)
+	walFormat := "bincode"
+	if spec.Storage.WALFormat != "" {
+		walFormat = spec.Storage.WALFormat
+	}
+	fmt.Fprintf(b, "wal_format = \"%s\"\n", walFormat)
 }
 
 func writeFlushSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
@@ -142,6 +147,11 @@ func writeFlushSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec
 	if spec.Flush.WALBatchDelayUs > 0 {
 		fmt.Fprintf(b, "wal_batch_delay_us = %d\n", spec.Flush.WALBatchDelayUs)
 	}
+	arrowWALEnabled := true
+	if spec.Flush.ArrowWALEnabled != nil {
+		arrowWALEnabled = *spec.Flush.ArrowWALEnabled
+	}
+	fmt.Fprintf(b, "arrow_wal_enabled = %t\n", arrowWALEnabled)
 }
 
 func writeChdbSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
@@ -189,15 +199,7 @@ func writeLoggingSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSp
 		format = spec.Logging.Format
 	}
 	fmt.Fprintf(b, "format = \"%s\"\n", format)
-	if spec.Logging.DetailedTrace != nil {
-		fmt.Fprintf(b, "detailed_trace = %t\n", *spec.Logging.DetailedTrace)
-	}
-	if spec.Logging.OtlpEndpoint != "" {
-		fmt.Fprintf(b, "otlp_endpoint = \"%s\"\n", spec.Logging.OtlpEndpoint)
-	}
-	if spec.Logging.OtlpSampleRatio != "" {
-		fmt.Fprintf(b, "otlp_sample_ratio = %s\n", spec.Logging.OtlpSampleRatio)
-	}
+
 }
 
 func writeStatementSummarySection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
@@ -251,7 +253,7 @@ func writeRetentionSection(b *strings.Builder, spec *v1alpha1.HyperbytedbCluster
 	if spec.Retention.Enabled != nil {
 		enabled = *spec.Retention.Enabled
 	}
-	interval := "60s"
+	interval := "12h"
 	if spec.Retention.Interval != "" {
 		interval = spec.Retention.Interval
 	}

@@ -3137,6 +3137,11 @@ spec:
                 type: object
               flush:
                 properties:
+                  arrowWALEnabled:
+                    default: true
+                    description: Keep chDB-ready Arrow batches in an in-memory WAL
+                      cache for zero-copy flush.
+                    type: boolean
                   intervalSecs:
                     default: 10
                     format: int32
@@ -3189,7 +3194,10 @@ spec:
                     type: integer
                 type: object
               image:
-                default: hyperbytedb:latest
+                description: |-
+                  Container image reference. When set with a tag (contains ':'), used as-is.
+                  When set without a tag, treated as the repository and combined with Version.
+                  When empty, defaults to hyperbytedb:{Version} or hyperbytedb:latest.
                 type: string
               imagePullPolicy:
                 description: PullPolicy describes a policy for if/when to pull a container
@@ -3215,10 +3223,6 @@ spec:
                 type: array
               logging:
                 properties:
-                  detailedTrace:
-                    description: Emit per-phase performance logs (write/query/flush).
-                      Off by default.
-                    type: boolean
                   format:
                     default: text
                     enum:
@@ -3233,13 +3237,6 @@ spec:
                     - info
                     - warn
                     - error
-                    type: string
-                  otlpEndpoint:
-                    description: OTLP HTTP endpoint for trace export (e.g. http://alloy-logs:4318).
-                    type: string
-                  otlpSampleRatio:
-                    description: Fraction of traces exported to OTLP (0.0–1.0). Default
-                      1.0 when OTLP is set.
                     type: string
                 type: object
               monitoring:
@@ -3271,7 +3268,7 @@ spec:
                   returning errors to clients.
                 properties:
                   enabled:
-                    default: false
+                    default: true
                     description: |-
                       When false, the operator does not create or reconcile any proxy
                       resources. Existing proxy Deployment/Service (if any) are left alone
@@ -3283,7 +3280,7 @@ spec:
                       Set to `/health/ready` for the deeper chDB-aware readiness check.
                     type: string
                   holdTimeoutSecs:
-                    default: 10
+                    default: 30
                     description: |-
                       How long the proxy waits for a backend to come back before failing a
                       request with 503. Bigger values mean rolling restarts are smoother but
@@ -3609,6 +3606,13 @@ spec:
                       storageClassName:
                         type: string
                     type: object
+                  walFormat:
+                    default: bincode
+                    description: 'WAL encoding format: "bincode" (default) or "arrow_ipc".'
+                    enum:
+                    - bincode
+                    - arrow_ipc
+                    type: string
                 type: object
               tolerations:
                 items:
@@ -3823,6 +3827,10 @@ spec:
                   type: object
                 type: array
               version:
+                description: |-
+                  Application version. Drives the container image tag for hyperbytedb and
+                  hyperbytedb-proxy (e.g. version "0.8.3" → hyperbytedb:v0.8.3). Changing
+                  this field triggers a rolling upgrade.
                 type: string
             type: object
           status:

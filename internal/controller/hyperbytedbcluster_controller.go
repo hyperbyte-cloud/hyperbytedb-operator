@@ -216,9 +216,8 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 		log.Error(err, "Failed to reconcile HPA")
 	}
 
-	// 11b. Proxy (optional). When disabled (default) we don't reconcile —
-	// any pre-existing proxy resources are left intact so users can clean
-	// them up out-of-band.
+	// 11b. Proxy (optional). Enabled by default; set spec.proxy.enabled=false
+	// to skip reconciliation.
 	if hyperbytedb.ProxyEnabled(cluster) {
 		if err := r.reconcileProxy(ctx, cluster); err != nil {
 			log.Error(err, "Failed to reconcile proxy")
@@ -527,7 +526,10 @@ func (r *HyperbytedbClusterReconciler) reconcilePDB(ctx context.Context, cluster
 
 	pdbName := cluster.Name + "-pdb"
 
-	if replicas < 3 {
+	// Single-node clusters don't need a PDB. For 2+ replicas keep at least
+	// N-1 pods available during voluntary disruption so rolling upgrades and
+	// node drains never take the whole cluster offline at once.
+	if replicas < 2 {
 		existing := &policyv1.PodDisruptionBudget{}
 		err := r.Get(ctx, types.NamespacedName{Name: pdbName, Namespace: cluster.Namespace}, existing)
 		if apierrors.IsNotFound(err) {
@@ -990,6 +992,15 @@ func (r *HyperbytedbClusterReconciler) updateStatus(ctx context.Context, cluster
 	cluster.Status.ReadyReplicas = sts.ReadyReplicas
 	cluster.Status.ConfigHash = configHash
 
+	rollingUpgrade := false
+	curSTS := &appsv1.StatefulSet{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Name: hyperbytedb.StatefulSetName(cluster), Namespace: cluster.Namespace,
+	}, curSTS); err == nil {
+		rollingUpgrade = curSTS.Status.UpdateRevision != "" &&
+			curSTS.Status.UpdateRevision != curSTS.Status.CurrentRevision
+	}
+
 	if sts.ReadyReplicas == sts.SpecReplicas && sts.SpecReplicas > 0 {
 		cluster.Status.Phase = hyperbytedbv1alpha1.ClusterPhaseRunning
 		meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
@@ -1000,9 +1011,14 @@ func (r *HyperbytedbClusterReconciler) updateStatus(ctx context.Context, cluster
 			LastTransitionTime: metav1.Now(),
 		})
 	} else {
-		if cluster.Status.Phase != hyperbytedbv1alpha1.ClusterPhaseFailed &&
-			cluster.Status.Phase != hyperbytedbv1alpha1.ClusterPhaseScaling &&
-			cluster.Status.Phase != hyperbytedbv1alpha1.ClusterPhaseUpgrading {
+		switch {
+		case cluster.Status.Phase == hyperbytedbv1alpha1.ClusterPhaseFailed:
+			// preserve
+		case cluster.Status.Phase == hyperbytedbv1alpha1.ClusterPhaseScaling:
+			// preserve
+		case rollingUpgrade:
+			cluster.Status.Phase = hyperbytedbv1alpha1.ClusterPhaseUpgrading
+		default:
 			cluster.Status.Phase = hyperbytedbv1alpha1.ClusterPhaseInitializing
 		}
 		meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{

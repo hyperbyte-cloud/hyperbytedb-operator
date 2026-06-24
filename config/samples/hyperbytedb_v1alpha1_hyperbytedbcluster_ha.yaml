@@ -27,8 +27,6 @@ spec:
   logging:
     level: info
     format: json
-    otlpEndpoint: http://alloy-logs:4318
-    otlpSampleRatio: "0.1"
   cardinality:
     maxTagValuesPerMeasurement: 100000
     maxMeasurementsPerDatabase: 10000
