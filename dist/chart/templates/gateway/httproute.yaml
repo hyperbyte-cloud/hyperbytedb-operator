@@ -1,0 +1,41 @@
+{{- if .Values.gateway.enabled -}}
+{{- if .Values.gateway.httpRoutes -}}
+{{- range .Values.gateway.httpRoutes }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "hyperbytedb-operator.resourceName" (dict "suffix" (printf "httproute-%s" .name) "context" $) }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ $.Release.Service }}
+    app.kubernetes.io/name: {{ include "hyperbytedb-operator.name" $ }}
+    helm.sh/chart: {{ $.Chart.Name }}-{{ $.Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ $.Release.Name }}
+    control-plane: controller-manager
+  {{- with .annotations }}
+  annotations: {{ toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs: {{ toYaml .parentRefs | nindent 4 }}
+  {{- with .hostnames }}
+  hostnames: {{ toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+  {{- range .rules }}
+  - matches:
+    {{- range .matches }}
+    - path:
+        type: {{ .pathType }}
+        value: {{ .path }}
+      {{- if .method }}
+      method: {{ .method }}
+      {{- end }}
+    {{- end }}
+    backendRefs:
+    - name: {{ include "hyperbytedb-operator.resourceName" (dict "suffix" "controller-manager-metrics-service" "context" $) }}
+      port: {{ $.Values.metrics.port }}
+  {{- end }}
+---
+{{- end }}
+{{- end }}
+{{- end }}

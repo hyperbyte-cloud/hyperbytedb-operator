@@ -13,3 +13,13 @@ To learn more about the release, try:
 
   $ helm status {{ .Release.Name }} -n {{ .Release.Namespace }}
   $ helm get all {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+{{- if .Values.ingress.enabled }}
+The metrics endpoint is exposed via Ingress:
+  {{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}{{ range .paths }}{{ .path }}{{ end }}
+  {{- end }}
+{{- end }}
+{{- if .Values.gateway.enabled }}
+Gateway API resources have been configured (gateway.enabled=true).
+{{- end }}
