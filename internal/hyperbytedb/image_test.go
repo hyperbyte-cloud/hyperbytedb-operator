@@ -12,9 +12,9 @@ func TestNormalizeVersionTag(t *testing.T) {
 		want string
 	}{
 		{"", "latest"},
-		{"0.8.3", "v0.8.3"},
-		{"v0.8.3", "v0.8.3"},
-		{"  1.0.0  ", "v1.0.0"},
+		{"0.8.3", "0.8.3"},
+		{"v0.8.3", "0.8.3"},
+		{"  1.0.0  ", "1.0.0"},
 	}
 	for _, tc := range tests {
 		if got := NormalizeVersionTag(tc.in); got != tc.want {
@@ -38,9 +38,9 @@ func TestResolveHyperbytedbImage(t *testing.T) {
 		c    *v1alpha1.HyperbytedbCluster
 		want string
 	}{
-		{"version only", cluster("", "0.8.3"), "hyperbytedb:v0.8.3"},
+		{"version only", cluster("", "0.8.3"), "hyperbytedb:0.8.3"},
 		{"explicit tag wins", cluster("hyperbytedb:local", "0.8.3"), "hyperbytedb:local"},
-		{"repo plus version", cluster("ghcr.io/org/hyperbytedb", "0.8.3"), "ghcr.io/org/hyperbytedb:v0.8.3"},
+		{"repo plus version", cluster("ghcr.io/org/hyperbytedb", "0.8.3"), "ghcr.io/org/hyperbytedb:0.8.3"},
 		{"default latest", cluster("", ""), "hyperbytedb:latest"},
 	}
 	for _, tc := range tests {
@@ -59,8 +59,8 @@ func TestResolveProxyImage(t *testing.T) {
 			Proxy:   &v1alpha1.ProxySpec{},
 		},
 	}
-	if got := ResolveProxyImage(c); got != "hyperbytedb-proxy:v0.8.3" {
-		t.Fatalf("ResolveProxyImage() = %q, want hyperbytedb-proxy:v0.8.3", got)
+	if got := ResolveProxyImage(c); got != "ghcr.io/hyperbyte-cloud/hyperbytedb-proxy:0.8.3" {
+		t.Fatalf("ResolveProxyImage() = %q, want ghcr.io/hyperbyte-cloud/hyperbytedb-proxy:0.8.3", got)
 	}
 
 	c.Spec.Proxy.Image = "hyperbytedb-proxy:local"

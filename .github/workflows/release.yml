@@ -47,10 +47,10 @@ jobs:
           if [ "${{ github.ref_type }}" = "tag" ]; then
             TAG="${{ github.ref_name }}"     # e.g. v0.1.2
             CHART_VERSION="${TAG#v}"          # 0.1.2 (chart/app versions are semver, no leading v)
-            IMAGE_TAG="$TAG"                  # v0.1.2
+            IMAGE_TAG="$CHART_VERSION"        # 0.1.2
           else
             CHART_VERSION="${{ inputs.version }}"
-            IMAGE_TAG="v${{ inputs.version }}"
+            IMAGE_TAG="${{ inputs.version }}"
           fi
           echo "chart_version=$CHART_VERSION" >> "$GITHUB_OUTPUT"
           echo "image_tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"

@@ -3292,7 +3292,7 @@ spec:
                     minimum: 0
                     type: integer
                   image:
-                    default: hyperbytedb-proxy:latest
+                    default: ghcr.io/hyperbyte-cloud/hyperbytedb-proxy
                     type: string
                   imagePullPolicy:
                     description: PullPolicy describes a policy for if/when to pull
@@ -3832,7 +3832,7 @@ spec:
               version:
                 description: |-
                   Application version. Drives the container image tag for hyperbytedb and
-                  hyperbytedb-proxy (e.g. version "0.8.3" → hyperbytedb:v0.8.3). Changing
+                  hyperbytedb-proxy (e.g. version "0.8.3" → hyperbytedb:0.8.3). Changing
                   this field triggers a rolling upgrade.
                 type: string
             type: object
