@@ -110,3 +110,58 @@ certManager:
 prometheus:
   enable: false
 
+## Ingress for the operator metrics endpoint.
+## Disabled by default. Enable to expose /metrics externally.
+##
+ingress:
+  enabled: false
+  ingressClassName: nginx
+  annotations: {}
+  hosts:
+    - host: operator.local
+      paths:
+        - path: /metrics
+          pathType: Prefix
+  tls: []
+  # tls:
+  #   - hosts:
+  #     - operator.local
+  #     secretName: operator-tls
+
+## Gateway API resources for the operator metrics endpoint.
+## Disabled by default. Requires Gateway API CRDs in the cluster.
+##
+gateway:
+  enabled: false
+  ## Provision a Gateway resource.
+  ## Set to null or omit to use an existing Gateway (reference it via HTTPRoute parentRefs instead).
+  gateway: null
+  # gateway:
+  #   gatewayClassName: istio
+  #   annotations: {}
+  #   listeners:
+  #     - name: https
+  #       port: 443
+  #       protocol: HTTPS
+  #       hostname: operator.local
+  #       tls:
+  #         mode: Terminate
+  #         certificateRefs:
+  #           - name: operator-tls
+
+  ## HTTPRoute resources attaching to a Gateway.
+  ## Each entry creates a separate HTTPRoute.
+  httpRoutes: []
+  # httpRoutes:
+  #   - name: metrics
+  #     annotations: {}
+  #     parentRefs:
+  #       - name: my-gateway
+  #         namespace: istio-system
+  #     hostnames:
+  #       - operator.local
+  #     rules:
+  #       - matches:
+  #           - pathType: PathPrefix
+  #             path: /metrics
+

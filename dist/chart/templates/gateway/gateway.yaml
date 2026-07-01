@@ -1,0 +1,21 @@
+{{- if .Values.gateway.enabled -}}
+{{- if .Values.gateway.gateway -}}
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: {{ include "hyperbytedb-operator.resourceName" (dict "suffix" "gateway" "context" $) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "hyperbytedb-operator.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    control-plane: controller-manager
+  {{- with .Values.gateway.gateway.annotations }}
+  annotations: {{ toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  gatewayClassName: {{ .Values.gateway.gateway.gatewayClassName }}
+  listeners: {{ toYaml .Values.gateway.gateway.listeners | nindent 4 }}
+{{- end }}
+{{- end }}
