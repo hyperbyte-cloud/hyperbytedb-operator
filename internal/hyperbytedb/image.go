@@ -9,20 +9,18 @@ import (
 
 const (
 	defaultHyperbytedbRepo = "hyperbytedb"
-	defaultProxyRepo       = "hyperbytedb-proxy"
+	defaultProxyRepo       = "ghcr.io/hyperbyte-cloud/hyperbytedb-proxy"
 	defaultImageTag        = "latest"
 )
 
 // NormalizeVersionTag maps a semver-ish version string to an OCI image tag.
-// "0.8.3" and "v0.8.3" both become "v0.8.3" to match published container tags.
+// "0.8.3" and "v0.8.3" both become "0.8.3".
 func NormalizeVersionTag(version string) string {
 	v := strings.TrimSpace(version)
 	if v == "" {
 		return defaultImageTag
 	}
-	if !strings.HasPrefix(v, "v") {
-		v = "v" + v
-	}
+	v = strings.TrimPrefix(v, "v")
 	return v
 }
 

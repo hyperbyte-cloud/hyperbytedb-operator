@@ -36,7 +36,7 @@ type HyperbytedbClusterSpec struct {
 	Image string `json:"image,omitempty"`
 
 	// Application version. Drives the container image tag for hyperbytedb and
-	// hyperbytedb-proxy (e.g. version "0.8.3" → hyperbytedb:v0.8.3). Changing
+	// hyperbytedb-proxy (e.g. version "0.8.3" → hyperbytedb:0.8.3). Changing
 	// this field triggers a rolling upgrade.
 	// +optional
 	Version string `json:"version,omitempty"`
@@ -455,7 +455,7 @@ type ProxySpec struct {
 	// +kubebuilder:default=true
 	Enabled bool `json:"enabled"`
 
-	// +kubebuilder:default="hyperbytedb-proxy:latest"
+	// +kubebuilder:default="ghcr.io/hyperbyte-cloud/hyperbytedb-proxy"
 	Image string `json:"image,omitempty"`
 
 	// +optional

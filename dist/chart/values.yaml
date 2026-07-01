@@ -14,7 +14,7 @@ manager:
   image:
     repository: ghcr.io/hyperbyte-cloud/hyperbytedb-operator
     # Leave empty to track the chart's appVersion (recommended). Override to
-    # pin to a specific tag, e.g. tag: "v0.2.0".
+      # pin to a specific tag, e.g. tag: "0.2.0".
     tag: ""
     pullPolicy: IfNotPresent
 
