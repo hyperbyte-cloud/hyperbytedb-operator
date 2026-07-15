@@ -13,7 +13,7 @@ permissions:
 jobs:
   test-e2e:
     name: E2E Tests
-    runs-on: hyperbytedb-operator-controller
+    runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       KIND_CLUSTER: hyperbytedb-e2e-${{ github.run_id }}-${{ github.run_attempt }}
