@@ -161,11 +161,19 @@ func writeChdbSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec)
 		sessionPath = spec.ChDB.SessionDataPath
 	}
 	fmt.Fprintf(b, "session_data_path = \"%s\"\n", sessionPath)
-	poolSize := int32(1)
-	if spec.ChDB.PoolSize > 0 {
-		poolSize = spec.ChDB.PoolSize
+	if spec.ChDB.QueryPoolSize > 0 {
+		fmt.Fprintf(b, "query_pool_size = %d\n", spec.ChDB.QueryPoolSize)
 	}
-	fmt.Fprintf(b, "pool_size = %d\n", poolSize)
+	if spec.ChDB.WritePoolSize > 0 {
+		fmt.Fprintf(b, "write_pool_size = %d\n", spec.ChDB.WritePoolSize)
+	}
+	if spec.ChDB.QueryPoolSize <= 0 && spec.ChDB.WritePoolSize <= 0 {
+		poolSize := int32(1)
+		if spec.ChDB.PoolSize > 0 {
+			poolSize = spec.ChDB.PoolSize
+		}
+		fmt.Fprintf(b, "pool_size = %d\n", poolSize)
+	}
 }
 
 func writeAuthSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {

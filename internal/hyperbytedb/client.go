@@ -400,3 +400,82 @@ func (c *Client) LeaveNode(ctx context.Context, host string, port int32, departe
 	}
 	return nil
 }
+
+// ---------- Proxy backend exclusion ----------
+
+// ProxyBackendStatus mirrors the JSON returned by the proxy's GET /admin/pool.
+type ProxyBackendStatus struct {
+	Addr                string `json:"addr"`
+	Port                int    `json:"port"`
+	Health              string `json:"health"`
+	Excluded            bool   `json:"excluded"`
+	Inflight            int    `json:"inflight"`
+	ConsecutiveFailures int    `json:"consecutive_failures"`
+}
+
+// excludeIncludeResponse is the envelope from POST /admin/backends/{ip}/exclude|include.
+type excludeIncludeResponse struct {
+	Status string `json:"status"`
+	IP     string `json:"ip"`
+}
+
+// ExcludeProxyBackend tells the proxy to stop routing to the given backend IP.
+func (c *Client) ExcludeProxyBackend(ctx context.Context, proxyHost string, port int32, ip string) error {
+	url := fmt.Sprintf("http://%s:%d/admin/backends/%s/exclude", proxyHost, port, ip)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("exclude backend %s: %w", ip, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("exclude backend %s returned %d: %s", ip, resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// IncludeProxyBackend tells the proxy to resume routing to the given backend IP.
+func (c *Client) IncludeProxyBackend(ctx context.Context, proxyHost string, port int32, ip string) error {
+	url := fmt.Sprintf("http://%s:%d/admin/backends/%s/include", proxyHost, port, ip)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("include backend %s: %w", ip, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("include backend %s returned %d: %s", ip, resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// GetProxyPoolState retrieves the full pool status from the proxy's admin API.
+func (c *Client) GetProxyPoolState(ctx context.Context, proxyHost string, port int32) ([]ProxyBackendStatus, error) {
+	url := fmt.Sprintf("http://%s:%d/admin/pool", proxyHost, port)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("get proxy pool state: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("proxy pool state returned %d: %s", resp.StatusCode, string(respBody))
+	}
+	var pool []ProxyBackendStatus
+	if err := json.NewDecoder(resp.Body).Decode(&pool); err != nil {
+		return nil, fmt.Errorf("decoding proxy pool state: %w", err)
+	}
+	return pool, nil
+}

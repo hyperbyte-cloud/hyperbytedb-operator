@@ -2977,20 +2977,39 @@ spec:
               chdb:
                 properties:
                   poolSize:
-                    default: 1
                     description: |-
-                      Ignored by hyperbytedb (libchdb is a process-global singleton). Retained
-                      for API stability; always written as 1 in config.toml.
+                      Sets both query and write pool sizes when QueryPoolSize and WritePoolSize
+                      are unset. Defaults to 1 when all pool fields are unset.
                     format: int32
+                    minimum: 1
+                    type: integer
+                  queryPoolSize:
+                    description: chDB connections reserved for queries. Isolated from
+                      ingest/flush.
+                    format: int32
+                    minimum: 1
                     type: integer
                   sessionDataPath:
                     description: |-
                       chDB session directory inside the data volume. Defaults to
                       /var/lib/hyperbytedb/chdb when unset.
                     type: string
+                  writePoolSize:
+                    description: chDB connections reserved for ingest and flush (Arrow
+                      WAL build, INSERTs).
+                    format: int32
+                    minimum: 1
+                    type: integer
                 type: object
               cluster:
                 properties:
+                  drainWaitSecs:
+                    default: 10
+                    description: |-
+                      Seconds to wait after excluding a backend from the proxy before
+                      deleting its pod. Gives in-flight requests time to drain.
+                    format: int32
+                    type: integer
                   heartbeatIntervalSecs:
                     default: 2
                     format: int32
@@ -3004,7 +3023,7 @@ spec:
                     format: int32
                     type: integer
                   raftHeartbeatIntervalMs:
-                    default: 300
+                    default: 1000
                     format: int32
                     type: integer
                   raftSnapshotThreshold:
@@ -3977,6 +3996,41 @@ spec:
                 description: 'Replication convergence state: Healthy, Lagging, Diverged,
                   Unknown.'
                 type: string
+              rollingRestart:
+                description: |-
+                  Tracks pod-by-pod proxy exclusion during rolling upgrades.
+                  Nil when no rolling restart is in progress.
+                properties:
+                  currentOrdinal:
+                    description: Ordinal of the pod currently being restarted.
+                    format: int32
+                    type: integer
+                  excludeConfirmed:
+                    description: True once the proxy confirms the backend is excluded.
+                    type: boolean
+                  oldPodIP:
+                    description: IP of the pod being excluded (set during Excluding
+                      phase).
+                    type: string
+                  phase:
+                    description: Current phase of the restart state machine.
+                    type: string
+                  phaseStartedAt:
+                    description: When the current phase started (used to compute drain
+                      wait).
+                    format: date-time
+                    type: string
+                  totalOrdinals:
+                    description: Total number of pod ordinals to cycle through.
+                    format: int32
+                    type: integer
+                required:
+                - currentOrdinal
+                - excludeConfirmed
+                - phase
+                - phaseStartedAt
+                - totalOrdinals
+                type: object
             type: object
         required:
         - spec
