@@ -34,6 +34,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -178,6 +179,18 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 			return ctrl.Result{Requeue: true}, nil
 		}
 		return r.setFailedStatus(ctx, cluster, "StatefulSetFailed", err)
+	}
+
+	// 6b. Operator-driven rolling restart coordination. When the StatefulSet
+	// has a pending rolling update and the proxy is enabled, the operator
+	// orchestrates pod-by-pod exclusion from the proxy, drain wait, pod
+	// deletion, and inclusion after the replacement pod is healthy.
+	if hyperbytedb.ProxyEnabled(cluster) {
+		if result, err := r.reconcileRollingRestart(ctx, cluster, stsResult, replicas); err != nil {
+			return r.setFailedStatus(ctx, cluster, "RollingRestartFailed", err)
+		} else if result != nil {
+			return *result, nil
+		}
 	}
 
 	// 7. Handle scaling
@@ -395,6 +408,19 @@ func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context,
 	existing.Spec.Template.Labels = desired.Spec.Template.Labels
 	existing.Spec.UpdateStrategy = desired.Spec.UpdateStrategy
 
+	// When the proxy is enabled the operator drives pod lifecycle itself
+	// (exclude → drain → delete → include) so there is no need to pin
+	// the StatefulSet partition.  Clear any leftover partition from a
+	// previous operator version so the STS controller can reconcile
+	// normally after the operator coordination finishes.
+	if existing.Spec.UpdateStrategy.RollingUpdate != nil &&
+		existing.Spec.UpdateStrategy.RollingUpdate.Partition != nil &&
+		*existing.Spec.UpdateStrategy.RollingUpdate.Partition != 0 {
+		existing.Spec.UpdateStrategy.RollingUpdate = &appsv1.RollingUpdateStatefulSetStrategy{
+			Partition: ptr.To(int32(0)),
+		}
+	}
+
 	if err := r.Update(ctx, existing); err != nil {
 		return stsReconcileResult{}, err
 	}
@@ -403,6 +429,312 @@ func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context,
 		SpecReplicas:  *existing.Spec.Replicas,
 		ReadyReplicas: existing.Status.ReadyReplicas,
 	}, nil
+}
+
+// ---------- Rolling Restart Coordination ----------
+
+// reconcileRollingRestart orchestrates pod-by-pod proxy exclusion during a
+// StatefulSet rolling upgrade. Returns a non-nil *ctrl.Result when the
+// caller should return early (requeue), or nil when no coordination is
+// needed (either no upgrade in progress or coordination is complete).
+func (r *HyperbytedbClusterReconciler) reconcileRollingRestart(
+	ctx context.Context,
+	cluster *hyperbytedbv1alpha1.HyperbytedbCluster,
+	stsResult stsReconcileResult,
+	replicas int32,
+) (*ctrl.Result, error) {
+	log := logf.FromContext(ctx)
+
+	// Check if a rolling upgrade is actually in progress.
+	curSTS := &appsv1.StatefulSet{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Name: hyperbytedb.StatefulSetName(cluster), Namespace: cluster.Namespace,
+	}, curSTS); err != nil {
+		return nil, err
+	}
+	rollingUpgrade := curSTS.Status.UpdateRevision != "" &&
+		curSTS.Status.UpdateRevision != curSTS.Status.CurrentRevision
+
+	// No rolling upgrade and no active restart state → nothing to do.
+	if !rollingUpgrade && cluster.Status.RollingRestart == nil {
+		return nil, nil
+	}
+
+	// If the upgrade finished (all replicas ready and up-to-date) AND the
+	// State machine reached Completed — clear coordination state once all
+	// pods are ready and up-to-date.
+	if cluster.Status.RollingRestart != nil &&
+		cluster.Status.RollingRestart.Phase == hyperbytedbv1alpha1.RollingRestartCompleted {
+		if stsResult.ReadyReplicas == stsResult.SpecReplicas &&
+			curSTS.Status.ReadyReplicas == curSTS.Status.Replicas &&
+			curSTS.Status.UpdatedReplicas == curSTS.Status.Replicas {
+			cluster.Status.RollingRestart = nil
+			if err := r.Status().Update(ctx, cluster); err != nil {
+				return nil, err
+			}
+			log.Info("Rolling restart complete, cleared coordination state")
+			return nil, nil
+		}
+	}
+
+	proxyPort := hyperbytedb.ServerPort(cluster)
+	stsName := hyperbytedb.StatefulSetName(cluster)
+
+	// Initialise state if this is the start of a new rolling upgrade.
+	if cluster.Status.RollingRestart == nil {
+		cluster.Status.RollingRestart = &hyperbytedbv1alpha1.RollingRestartState{
+			CurrentOrdinal: 0,
+			TotalOrdinals:  replicas,
+			Phase:          hyperbytedbv1alpha1.RollingRestartExcluding,
+			PhaseStartedAt: metav1.Now(),
+		}
+		if err := r.Status().Update(ctx, cluster); err != nil {
+			return nil, err
+		}
+		log.Info("Starting operator-driven rolling restart", "totalOrdinals", replicas)
+	}
+
+	state := cluster.Status.RollingRestart
+	if state == nil {
+		// CRD schema didn't persist the field (stale CRD or server-side pruning).
+		// Re-initialize so the state machine can proceed.
+		state = &hyperbytedbv1alpha1.RollingRestartState{
+			CurrentOrdinal: 0,
+			TotalOrdinals:  replicas,
+			Phase:          hyperbytedbv1alpha1.RollingRestartExcluding,
+			PhaseStartedAt: metav1.Now(),
+		}
+		cluster.Status.RollingRestart = state
+		if err := r.Status().Update(ctx, cluster); err != nil {
+			return nil, err
+		}
+	}
+	podName := fmt.Sprintf("%s-%d", stsName, state.CurrentOrdinal)
+
+	requeue3s := ctrl.Result{RequeueAfter: 3 * time.Second}
+
+	switch state.Phase {
+	case hyperbytedbv1alpha1.RollingRestartExcluding:
+		// Get the pod's IP.
+		pod := &corev1.Pod{}
+		if err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: cluster.Namespace}, pod); err != nil {
+			if apierrors.IsNotFound(err) {
+				// Pod not yet created; skip to WaitingReady (StatefulSet is still rolling).
+				state.Phase = hyperbytedbv1alpha1.RollingRestartWaitingReady
+				state.PhaseStartedAt = metav1.Now()
+				if err := r.Status().Update(ctx, cluster); err != nil {
+					return nil, err
+				}
+				return &requeue3s, nil
+			}
+			return nil, err
+		}
+
+		podIP := pod.Status.PodIP
+		if podIP == "" {
+			log.Info("Pod has no IP yet, waiting", "pod", podName)
+			return &requeue3s, nil
+		}
+		state.OldPodIP = podIP
+
+		// Call proxy exclude on ALL proxy pods (not just one via Service round-robin).
+		if err := r.excludeFromAllProxies(ctx, cluster, podIP, proxyPort); err != nil {
+			log.V(1).Info("Could not exclude backend from proxy, will retry", "pod", podName, "ip", podIP, "error", err)
+			return &requeue3s, nil
+		}
+		log.Info("Excluded backend from proxy", "pod", podName, "ip", podIP)
+		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, "BackendExcluded",
+			"Excluded pod %s (%s) from proxy routing", podName, podIP)
+		state.ExcludeConfirmed = true
+		state.Phase = hyperbytedbv1alpha1.RollingRestartDraining
+		state.PhaseStartedAt = metav1.Now()
+		if err := r.Status().Update(ctx, cluster); err != nil {
+			return nil, err
+		}
+		return &requeue3s, nil
+
+	case hyperbytedbv1alpha1.RollingRestartDraining:
+		// Wait for drain time.
+		drainWait := time.Duration(cluster.Spec.Cluster.DrainWaitSecs) * time.Second
+		if drainWait <= 0 {
+			drainWait = 10 * time.Second
+		}
+		elapsed := time.Since(state.PhaseStartedAt.Time)
+		if elapsed < drainWait {
+			log.Info("Waiting for in-flight requests to drain",
+				"pod", podName, "elapsed", elapsed.Truncate(time.Second), "wait", drainWait)
+			return &ctrl.Result{RequeueAfter: drainWait - elapsed + time.Second}, nil
+		}
+
+		// Delete the pod to trigger recreation from the updated StatefulSet template.
+		pod := &corev1.Pod{}
+		if err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: cluster.Namespace}, pod); err != nil {
+			if apierrors.IsNotFound(err) {
+				// Already gone, move to WaitingReady.
+				state.Phase = hyperbytedbv1alpha1.RollingRestartWaitingReady
+				state.PhaseStartedAt = metav1.Now()
+				if err := r.Status().Update(ctx, cluster); err != nil {
+					return nil, err
+				}
+				return &requeue3s, nil
+			}
+			return nil, err
+		}
+
+		if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+			return nil, fmt.Errorf("deleting pod %s for rolling restart: %w", podName, err)
+		}
+		log.Info("Deleted pod for rolling restart", "pod", podName)
+		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, "PodRestarted",
+			"Deleted pod %s for rolling upgrade", podName)
+		state.Phase = hyperbytedbv1alpha1.RollingRestartWaitingReady
+		state.PhaseStartedAt = metav1.Now()
+		if err := r.Status().Update(ctx, cluster); err != nil {
+			return nil, err
+		}
+		return &requeue3s, nil
+
+	case hyperbytedbv1alpha1.RollingRestartWaitingReady:
+		// Wait for the new pod to be Ready.
+		pod := &corev1.Pod{}
+		if err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: cluster.Namespace}, pod); err != nil {
+			if apierrors.IsNotFound(err) {
+				log.Info("Waiting for replacement pod to appear", "pod", podName)
+				return &requeue3s, nil
+			}
+			return nil, err
+		}
+
+		if !isPodReady(pod) || pod.DeletionTimestamp != nil {
+			if pod.DeletionTimestamp != nil {
+				log.Info("Old pod still terminating, waiting for replacement", "pod", podName)
+			} else {
+				log.Info("Replacement pod not ready yet", "pod", podName)
+			}
+			return &requeue3s, nil
+		}
+
+		// Pod is ready and not terminating — get its IP and include it.
+		newIP := pod.Status.PodIP
+		if newIP == "" {
+			log.Info("Pod is ready but has no IP, waiting", "pod", podName)
+			return &requeue3s, nil
+		}
+
+		if err := r.includeFromAllProxies(ctx, cluster, newIP, proxyPort); err != nil {
+			log.V(1).Info("Could not include backend in proxy, will retry", "pod", podName, "ip", newIP, "error", err)
+			return &requeue3s, nil
+		}
+		log.Info("Included backend in proxy", "pod", podName, "ip", newIP)
+		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, "BackendIncluded",
+			"Included pod %s (%s) in proxy routing", podName, newIP)
+
+		// Move to next ordinal or finish.
+		state.CurrentOrdinal++
+		if state.CurrentOrdinal >= state.TotalOrdinals {
+			// All pods have been cycled. Set Completed phase and let the
+			// "upgrade finished" check clear the state once the STS settles.
+			state.Phase = hyperbytedbv1alpha1.RollingRestartCompleted
+			state.PhaseStartedAt = metav1.Now()
+			if err := r.Status().Update(ctx, cluster); err != nil {
+				return nil, err
+			}
+			log.Info("Rolling restart coordination complete")
+			return &ctrl.Result{RequeueAfter: 3 * time.Second}, nil
+		}
+		state.Phase = hyperbytedbv1alpha1.RollingRestartExcluding
+		state.PhaseStartedAt = metav1.Now()
+		state.ExcludeConfirmed = false
+		state.OldPodIP = ""
+		if err := r.Status().Update(ctx, cluster); err != nil {
+			return nil, err
+		}
+		return &requeue3s, nil
+	}
+
+	// Coordination complete but STS hasn't fully settled yet — just wait.
+	if state.Phase == hyperbytedbv1alpha1.RollingRestartCompleted {
+		return &requeue3s, nil
+	}
+
+	return nil, nil
+}
+
+// isPodReady returns true if the pod has a Ready condition with Status=True.
+func isPodReady(pod *corev1.Pod) bool {
+	for _, cond := range pod.Status.Conditions {
+		if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+			return true
+		}
+	}
+	return false
+}
+
+// excludeFromAllProxies sends the exclude command to every proxy pod
+// individually, so the exclusion takes effect on all proxy instances (the
+// ClusterIP Service only round-robins to one). Returns an error if any
+// proxy pod is not ready so the caller retries.
+func (r *HyperbytedbClusterReconciler) excludeFromAllProxies(
+	ctx context.Context,
+	cluster *hyperbytedbv1alpha1.HyperbytedbCluster,
+	backendIP string,
+	proxyPort int32,
+) error {
+	proxyPods := &corev1.PodList{}
+	if err := r.List(ctx, proxyPods,
+		client.InNamespace(cluster.Namespace),
+		client.MatchingLabels{
+			"app.kubernetes.io/name":       "hyperbytedb-proxy",
+			"app.kubernetes.io/instance":   cluster.Name,
+			"app.kubernetes.io/managed-by": "hyperbytedb-operator",
+			"app.kubernetes.io/component":  "proxy",
+		},
+	); err != nil {
+		return fmt.Errorf("listing proxy pods: %w", err)
+	}
+	for i := range proxyPods.Items {
+		pod := &proxyPods.Items[i]
+		if pod.Status.PodIP == "" || !isPodReady(pod) {
+			return fmt.Errorf("proxy pod %s not ready (IP=%s, ready=%v), will retry", pod.Name, pod.Status.PodIP, isPodReady(pod))
+		}
+		if err := r.Members.Client.ExcludeProxyBackend(ctx, pod.Status.PodIP, proxyPort, backendIP); err != nil {
+			return fmt.Errorf("exclude on proxy pod %s: %w", pod.Name, err)
+		}
+	}
+	return nil
+}
+
+// includeFromAllProxies sends the include command to every proxy pod.
+// Returns an error if any proxy pod is not ready, so the caller retries —
+// skipping a proxy would leave a stale exclusion on that instance.
+func (r *HyperbytedbClusterReconciler) includeFromAllProxies(
+	ctx context.Context,
+	cluster *hyperbytedbv1alpha1.HyperbytedbCluster,
+	backendIP string,
+	proxyPort int32,
+) error {
+	proxyPods := &corev1.PodList{}
+	if err := r.List(ctx, proxyPods,
+		client.InNamespace(cluster.Namespace),
+		client.MatchingLabels{
+			"app.kubernetes.io/name":       "hyperbytedb-proxy",
+			"app.kubernetes.io/instance":   cluster.Name,
+			"app.kubernetes.io/managed-by": "hyperbytedb-operator",
+			"app.kubernetes.io/component":  "proxy",
+		},
+	); err != nil {
+		return fmt.Errorf("listing proxy pods: %w", err)
+	}
+	for i := range proxyPods.Items {
+		pod := &proxyPods.Items[i]
+		if pod.Status.PodIP == "" || !isPodReady(pod) {
+			return fmt.Errorf("proxy pod %s not ready (IP=%s, ready=%v), will retry", pod.Name, pod.Status.PodIP, isPodReady(pod))
+		}
+		if err := r.Members.Client.IncludeProxyBackend(ctx, pod.Status.PodIP, proxyPort, backendIP); err != nil {
+			return fmt.Errorf("include on proxy pod %s: %w", pod.Name, err)
+		}
+	}
+	return nil
 }
 
 // ---------- Scale-down handling ----------

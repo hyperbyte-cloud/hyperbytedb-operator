@@ -26,6 +26,11 @@ func ProxyServiceName(cluster *v1alpha1.HyperbytedbCluster) string {
 	return cluster.Name + "-proxy"
 }
 
+// ProxyServiceAddr returns the in-cluster DNS name for the proxy Service.
+func ProxyServiceAddr(cluster *v1alpha1.HyperbytedbCluster) string {
+	return fmt.Sprintf("%s.%s.svc.cluster.local", ProxyServiceName(cluster), cluster.Namespace)
+}
+
 // ProxyEnabled reports whether the operator should reconcile proxy resources.
 // The proxy is enabled by default; set spec.proxy.enabled=false to opt out.
 func ProxyEnabled(cluster *v1alpha1.HyperbytedbCluster) bool {

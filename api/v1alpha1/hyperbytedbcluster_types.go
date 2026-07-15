@@ -229,10 +229,21 @@ type ChDBSpec struct {
 	// +optional
 	SessionDataPath string `json:"sessionDataPath,omitempty"`
 
-	// Ignored by hyperbytedb (libchdb is a process-global singleton). Retained
-	// for API stability; always written as 1 in config.toml.
-	// +kubebuilder:default=1
+	// Sets both query and write pool sizes when QueryPoolSize and WritePoolSize
+	// are unset. Defaults to 1 when all pool fields are unset.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
 	PoolSize int32 `json:"poolSize,omitempty"`
+
+	// chDB connections reserved for queries. Isolated from ingest/flush.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	QueryPoolSize int32 `json:"queryPoolSize,omitempty"`
+
+	// chDB connections reserved for ingest and flush (Arrow WAL build, INSERTs).
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	WritePoolSize int32 `json:"writePoolSize,omitempty"`
 }
 
 type AuthSpec struct {
@@ -264,7 +275,7 @@ type ClusterTuningSpec struct {
 	// +kubebuilder:default=5
 	ReplicationMaxRetries int32 `json:"replicationMaxRetries,omitempty"`
 
-	// +kubebuilder:default=300
+	// +kubebuilder:default=1000
 	RaftHeartbeatIntervalMs int32 `json:"raftHeartbeatIntervalMs,omitempty"`
 
 	// +kubebuilder:default=1000
@@ -306,6 +317,12 @@ type ClusterTuningSpec struct {
 	// TLS for inter-node replication traffic.
 	// +optional
 	TLS *TLSSpec `json:"tls,omitempty"`
+
+	// Seconds to wait after excluding a backend from the proxy before
+	// deleting its pod. Gives in-flight requests time to drain.
+	// +kubebuilder:default=10
+	// +optional
+	DrainWaitSecs int32 `json:"drainWaitSecs,omitempty"`
 }
 
 // ReplicationSpec controls coordinator-side replication (how this node's
@@ -543,6 +560,40 @@ const (
 	ClusterPhaseFailed       ClusterPhase = "Failed"
 )
 
+// RollingRestartPhase tracks which step of the proxy-coordinated rolling
+// restart the operator is currently executing.
+type RollingRestartPhase string
+
+const (
+	RollingRestartExcluding    RollingRestartPhase = "Excluding"
+	RollingRestartDraining     RollingRestartPhase = "Draining"
+	RollingRestartWaitingReady RollingRestartPhase = "WaitingReady"
+	RollingRestartIncluding    RollingRestartPhase = "Including"
+	RollingRestartCompleted    RollingRestartPhase = "Completed"
+)
+
+// RollingRestartState tracks pod-by-pod proxy exclusion during rolling upgrades.
+// Nil when no rolling restart is in progress.
+type RollingRestartState struct {
+	// Ordinal of the pod currently being restarted.
+	CurrentOrdinal int32 `json:"currentOrdinal"`
+
+	// Total number of pod ordinals to cycle through.
+	TotalOrdinals int32 `json:"totalOrdinals"`
+
+	// Current phase of the restart state machine.
+	Phase RollingRestartPhase `json:"phase"`
+
+	// When the current phase started (used to compute drain wait).
+	PhaseStartedAt metav1.Time `json:"phaseStartedAt"`
+
+	// IP of the pod being excluded (set during Excluding phase).
+	OldPodIP string `json:"oldPodIP,omitempty"`
+
+	// True once the proxy confirms the backend is excluded.
+	ExcludeConfirmed bool `json:"excludeConfirmed"`
+}
+
 // MemberStatus describes the observed state of a single cluster member.
 type MemberStatus struct {
 	// Stable identifier derived from the StatefulSet ordinal.
@@ -603,6 +654,11 @@ type HyperbytedbClusterStatus struct {
 	// Hash of the current config.toml used for rolling update detection.
 	// +optional
 	ConfigHash string `json:"configHash,omitempty"`
+
+	// Tracks pod-by-pod proxy exclusion during rolling upgrades.
+	// Nil when no rolling restart is in progress.
+	// +optional
+	RollingRestart *RollingRestartState `json:"rollingRestart,omitempty"`
 
 	// +listType=map
 	// +listMapKey=type
