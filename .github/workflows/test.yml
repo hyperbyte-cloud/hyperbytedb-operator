@@ -13,7 +13,7 @@ permissions:
 jobs:
   test:
     name: Test
-    runs-on: hyperbytedb-operator-controller
+    runs-on: ubuntu-latest
     steps:
       - name: Clone the code
         uses: actions/checkout@v4

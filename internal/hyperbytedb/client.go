@@ -413,12 +413,6 @@ type ProxyBackendStatus struct {
 	ConsecutiveFailures int    `json:"consecutive_failures"`
 }
 
-// excludeIncludeResponse is the envelope from POST /admin/backends/{ip}/exclude|include.
-type excludeIncludeResponse struct {
-	Status string `json:"status"`
-	IP     string `json:"ip"`
-}
-
 // ExcludeProxyBackend tells the proxy to stop routing to the given backend IP.
 func (c *Client) ExcludeProxyBackend(ctx context.Context, proxyHost string, port int32, ip string) error {
 	url := fmt.Sprintf("http://%s:%d/admin/backends/%s/exclude", proxyHost, port, ip)

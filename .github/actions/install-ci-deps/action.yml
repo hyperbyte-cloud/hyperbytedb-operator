@@ -1,5 +1,5 @@
 name: Install CI dependencies
-description: Install system packages and tools for ARC/Kubernetes GitHub Actions runners
+description: Install system packages and tools for GitHub Actions runners
 
 inputs:
   profile:

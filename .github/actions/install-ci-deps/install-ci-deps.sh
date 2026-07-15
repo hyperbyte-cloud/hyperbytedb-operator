@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# Install CI dependencies for GitHub Actions on ARC/Kubernetes runners.
+# Install CI dependencies for GitHub Actions runners.
 #
-# ARC runner pods use the actions-runner image, which is minimal and typically
-# runs as a non-root user without sudo. Job-level `container:` directives are
-# not supported unless the runner scale set is configured for container jobs, so
-# workflows install what they need directly into the runner pod.
+# GitHub-hosted ubuntu runners have sudo and apt-get. Self-hosted/ARC runner
+# pods may be minimal and non-root; this script falls back to user-local
+# installs when package managers are unavailable.
 set -euo pipefail
 
 PROFILE="${1:-k8s-runner}"
