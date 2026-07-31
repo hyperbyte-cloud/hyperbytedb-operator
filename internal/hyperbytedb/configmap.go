@@ -126,16 +126,6 @@ func writeFlushSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec
 		intervalSecs = spec.Flush.IntervalSecs
 	}
 	fmt.Fprintf(b, "interval_secs = %d\n", intervalSecs)
-	walThreshold := int32(64)
-	if spec.Flush.WALSizeThresholdMB > 0 {
-		walThreshold = spec.Flush.WALSizeThresholdMB
-	}
-	fmt.Fprintf(b, "wal_size_threshold_mb = %d\n", walThreshold)
-	timeBucket := "1h"
-	if spec.Flush.TimeBucketDuration != "" {
-		timeBucket = spec.Flush.TimeBucketDuration
-	}
-	fmt.Fprintf(b, "time_bucket_duration = \"%s\"\n", timeBucket)
 	maxPointsPerBatch := int32(50000)
 	if spec.Flush.MaxPointsPerBatch > 0 {
 		maxPointsPerBatch = spec.Flush.MaxPointsPerBatch
