@@ -195,12 +195,6 @@ type FlushSpec struct {
 	// +kubebuilder:default=10
 	IntervalSecs int32 `json:"intervalSecs,omitempty"`
 
-	// +kubebuilder:default=64
-	WALSizeThresholdMB int32 `json:"walSizeThresholdMb,omitempty"`
-
-	// +kubebuilder:default="1h"
-	TimeBucketDuration string `json:"timeBucketDuration,omitempty"`
-
 	// Max points per chDB insert batch (clamped server-side to 10k–500k).
 	// +kubebuilder:default=50000
 	// +optional

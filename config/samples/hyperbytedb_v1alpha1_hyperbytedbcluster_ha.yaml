@@ -17,8 +17,6 @@ spec:
       storageClassName: fast-ssd
   flush:
     intervalSecs: 5
-    walSizeThresholdMb: 128
-    timeBucketDuration: "1h"
   chdb:
     sessionDataPath: /var/lib/hyperbytedb/chdb
   auth:

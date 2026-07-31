@@ -17,8 +17,6 @@ spec:
       size: 10Gi
   flush:
     intervalSecs: 10
-    walSizeThresholdMb: 64
-    timeBucketDuration: "1h"
     maxPointsPerBatch: 50000
   chdb:
     sessionDataPath: /var/lib/hyperbytedb/chdb

@@ -68,10 +68,6 @@ func (w *HyperbytedbClusterWebhook) Default(_ context.Context, obj *HyperbytedbC
 		}
 	}
 
-	if obj.Spec.Flush.TimeBucketDuration == "" {
-		obj.Spec.Flush.TimeBucketDuration = "1h"
-	}
-
 	if obj.Spec.ChDB.PoolSize == 0 {
 		obj.Spec.ChDB.PoolSize = 1
 	}

@@ -3172,9 +3172,6 @@ spec:
                     format: int32
                     minimum: 0
                     type: integer
-                  timeBucketDuration:
-                    default: 1h
-                    type: string
                   walBatchDelayUs:
                     description: 'WAL group-commit: max microseconds to wait for more
                       entries before flushing.'
@@ -3186,10 +3183,6 @@ spec:
                       batch. 0 = disabled.'
                     format: int32
                     minimum: 0
-                    type: integer
-                  walSizeThresholdMb:
-                    default: 64
-                    format: int32
                     type: integer
                 type: object
               hintedHandoff:
