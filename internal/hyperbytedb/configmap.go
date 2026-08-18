@@ -77,6 +77,7 @@ func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, cl
 	writeRateLimitSection(&b, spec)
 	writeRetentionSection(&b, spec)
 	writeClusterSection(&b, cluster, clusterEnabled)
+	writeShardingSection(&b, spec)
 
 	return b.String()
 }
@@ -354,5 +355,53 @@ func writeMinAcks(b *strings.Builder, v *intstr.IntOrString) {
 		fmt.Fprintf(b, "min_acks = %d\n", v.IntValue())
 	case intstr.String:
 		fmt.Fprintf(b, "min_acks = \"%s\"\n", v.StrVal)
+	}
+}
+
+func writeShardingSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
+	if spec.Sharding == nil {
+		return
+	}
+	s := spec.Sharding
+	b.WriteString("\n[sharding]\n")
+	fmt.Fprintf(b, "enabled = %t\n", s.Enabled)
+	if s.ReplicationFactor > 0 {
+		fmt.Fprintf(b, "replication_factor = %d\n", s.ReplicationFactor)
+	}
+	if s.RegionSplitSeries > 0 {
+		fmt.Fprintf(b, "region_split_series = %d\n", s.RegionSplitSeries)
+	}
+	if s.RegionMaxSeries > 0 {
+		fmt.Fprintf(b, "region_max_series = %d\n", s.RegionMaxSeries)
+	}
+	if s.RegionMergeSeries > 0 {
+		fmt.Fprintf(b, "region_merge_series = %d\n", s.RegionMergeSeries)
+	}
+	if s.SplitMergeIntervalSecs > 0 {
+		fmt.Fprintf(b, "split_merge_interval_secs = %d\n", s.SplitMergeIntervalSecs)
+	}
+	if s.ScheduleLimit > 0 {
+		fmt.Fprintf(b, "schedule_limit = %d\n", s.ScheduleLimit)
+	}
+	if s.HeartbeatIntervalSecs > 0 {
+		fmt.Fprintf(b, "heartbeat_interval_secs = %d\n", s.HeartbeatIntervalSecs)
+	}
+	if s.BootstrapTimeoutMs > 0 {
+		fmt.Fprintf(b, "bootstrap_timeout_ms = %d\n", s.BootstrapTimeoutMs)
+	}
+	if s.PrimaryFailoverAfterSecs > 0 {
+		fmt.Fprintf(b, "primary_failover_after_secs = %d\n", s.PrimaryFailoverAfterSecs)
+	}
+	if s.ScatterPeerTimeoutMs > 0 {
+		fmt.Fprintf(b, "scatter_peer_timeout_ms = %d\n", s.ScatterPeerTimeoutMs)
+	}
+	if s.ScatterMaxPeerAttempts > 0 {
+		fmt.Fprintf(b, "scatter_max_peer_attempts = %d\n", s.ScatterMaxPeerAttempts)
+	}
+	if s.LoadSplitQpsThreshold != nil {
+		fmt.Fprintf(b, "load_split_qps_threshold = %d\n", *s.LoadSplitQpsThreshold)
+	}
+	if s.MaxRegionsPerMeasurement > 0 {
+		fmt.Fprintf(b, "max_regions_per_measurement = %d\n", s.MaxRegionsPerMeasurement)
 	}
 }

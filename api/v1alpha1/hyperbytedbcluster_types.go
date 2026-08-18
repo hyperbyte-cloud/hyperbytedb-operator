@@ -76,6 +76,11 @@ type HyperbytedbClusterSpec struct {
 	// +optional
 	Cluster ClusterTuningSpec `json:"cluster,omitempty"`
 
+	// Experimental series sharding. When set, the operator writes a `[sharding]`
+	// block into config.toml. Enabling it requires replicas > 1 (cluster mode).
+	// +optional
+	Sharding *ShardingSpec `json:"sharding,omitempty"`
+
 	// +optional
 	Cardinality CardinalitySpec `json:"cardinality,omitempty"`
 
@@ -317,6 +322,81 @@ type ClusterTuningSpec struct {
 	// +kubebuilder:default=10
 	// +optional
 	DrainWaitSecs int32 `json:"drainWaitSecs,omitempty"`
+}
+
+// ShardingSpec maps to HyperbyteDB `[sharding]` (experimental series_id range
+// sharding). Omitted fields are left out of config.toml so the server defaults apply.
+// When enabled, config validation requires regionMergeSeries < regionSplitSeries
+// < regionMaxSeries (same inequalities as hyperbytedb).
+type ShardingSpec struct {
+	// Master switch. Written as sharding.enabled.
+	Enabled bool `json:"enabled"`
+
+	// Target replica count per shard region.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	ReplicationFactor int32 `json:"replicationFactor,omitempty"`
+
+	// Target series per region before split.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	RegionSplitSeries int64 `json:"regionSplitSeries,omitempty"`
+
+	// Hard split threshold (must be > regionSplitSeries when both are set).
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	RegionMaxSeries int64 `json:"regionMaxSeries,omitempty"`
+
+	// Merge when adjacent regions fall below this (must be < regionSplitSeries when both are set).
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	RegionMergeSeries int64 `json:"regionMergeSeries,omitempty"`
+
+	// Cooldown between split/merge on a region.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	SplitMergeIntervalSecs int64 `json:"splitMergeIntervalSecs,omitempty"`
+
+	// Max concurrent split/move/merge operators.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	ScheduleLimit int32 `json:"scheduleLimit,omitempty"`
+
+	// Region-stats report interval and shard scheduler tick (same duration).
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	HeartbeatIntervalSecs int64 `json:"heartbeatIntervalSecs,omitempty"`
+
+	// Sync bootstrap RPC timeout.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	BootstrapTimeoutMs int64 `json:"bootstrapTimeoutMs,omitempty"`
+
+	// Seconds before the Raft leader proposes TransferPrimary for an unhealthy primary.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	PrimaryFailoverAfterSecs int64 `json:"primaryFailoverAfterSecs,omitempty"`
+
+	// Per-peer HTTP timeout for sharded query/write/metadata scatter.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	ScatterPeerTimeoutMs int64 `json:"scatterPeerTimeoutMs,omitempty"`
+
+	// Max Active peers tried per region per scatter request.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	ScatterMaxPeerAttempts int32 `json:"scatterMaxPeerAttempts,omitempty"`
+
+	// Load-based split QPS threshold; 0 = disabled. Emitted only when set so the
+	// server default (0) applies when omitted.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	LoadSplitQpsThreshold *int64 `json:"loadSplitQpsThreshold,omitempty"`
+
+	// Hard cap on regions per measurement.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	MaxRegionsPerMeasurement int32 `json:"maxRegionsPerMeasurement,omitempty"`
 }
 
 // ReplicationSpec controls coordinator-side replication (how this node's

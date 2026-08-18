@@ -43,6 +43,13 @@ spec:
     replication:
       mode: async
       ackTimeoutMs: 5000
+  sharding:
+    enabled: true
+    replicationFactor: 3
+    regionSplitSeries: 100000
+    regionMaxSeries: 150000
+    regionMergeSeries: 20000
+    heartbeatIntervalSecs: 10
   monitoring:
     enabled: true
     serviceMonitor: true
