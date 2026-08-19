@@ -3792,6 +3792,89 @@ spec:
                     - enabled
                     type: object
                 type: object
+              sharding:
+                description: |-
+                  Experimental series sharding. When set, the operator writes a `[sharding]`
+                  block into config.toml. Enabling it requires replicas > 1 (cluster mode).
+                properties:
+                  bootstrapTimeoutMs:
+                    description: Sync bootstrap RPC timeout.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  enabled:
+                    description: Master switch. Written as sharding.enabled.
+                    type: boolean
+                  heartbeatIntervalSecs:
+                    description: Region-stats report interval and shard scheduler
+                      tick (same duration).
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  loadSplitQpsThreshold:
+                    description: |-
+                      Load-based split QPS threshold; 0 = disabled. Emitted only when set so the
+                      server default (0) applies when omitted.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                  maxRegionsPerMeasurement:
+                    description: Hard cap on regions per measurement.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  primaryFailoverAfterSecs:
+                    description: Seconds before the Raft leader proposes TransferPrimary
+                      for an unhealthy primary.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  regionMaxSeries:
+                    description: Hard split threshold (must be > regionSplitSeries
+                      when both are set).
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  regionMergeSeries:
+                    description: Merge when adjacent regions fall below this (must
+                      be < regionSplitSeries when both are set).
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  regionSplitSeries:
+                    description: Target series per region before split.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  replicationFactor:
+                    description: Target replica count per shard region.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  scatterMaxPeerAttempts:
+                    description: Max Active peers tried per region per scatter request.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  scatterPeerTimeoutMs:
+                    description: Per-peer HTTP timeout for sharded query/write/metadata
+                      scatter.
+                    format: int64
+                    minimum: 1
+                    type: integer
+                  scheduleLimit:
+                    description: Max concurrent split/move/merge operators.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  splitMergeIntervalSecs:
+                    description: Cooldown between split/merge on a region.
+                    format: int64
+                    minimum: 0
+                    type: integer
+                required:
+                - enabled
+                type: object
               statementSummary:
                 description: |-
                   StatementSummarySpec controls collection of per-statement execution stats

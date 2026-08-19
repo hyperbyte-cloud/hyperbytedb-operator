@@ -46,6 +46,7 @@ func TestRenderConfigTOML_singleNode(t *testing.T) {
 		"data_dir",
 		"anti_entropy",
 		"wal_replication",
+		"[sharding]",
 	} {
 		if strings.Contains(out, absent) {
 			t.Fatalf("expected config NOT to contain %q\n\ngot:\n%s", absent, out)
@@ -106,5 +107,46 @@ func TestConfigHash_ignoresReplicaCount(t *testing.T) {
 
 	if ConfigHash(one) != ConfigHash(three) {
 		t.Fatal("ConfigHash must not change when only replica count changes")
+	}
+}
+
+func TestRenderConfigTOML_sharding(t *testing.T) {
+	cluster := &v1alpha1.HyperbytedbCluster{
+		Spec: v1alpha1.HyperbytedbClusterSpec{
+			Replicas: ptr.To(int32(3)),
+			Sharding: &v1alpha1.ShardingSpec{
+				Enabled:                  true,
+				ReplicationFactor:        2,
+				RegionSplitSeries:        5,
+				RegionMaxSeries:          10,
+				RegionMergeSeries:        2,
+				HeartbeatIntervalSecs:    10,
+				LoadSplitQpsThreshold:    ptr.To(int64(0)),
+				MaxRegionsPerMeasurement: 128,
+			},
+		},
+	}
+
+	out := renderConfigTOML(cluster)
+	for _, want := range []string{
+		"[sharding]",
+		"enabled = true",
+		"replication_factor = 2",
+		"region_split_series = 5",
+		"region_max_series = 10",
+		"region_merge_series = 2",
+		"heartbeat_interval_secs = 10",
+		"load_split_qps_threshold = 0",
+		"max_regions_per_measurement = 128",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected config to contain %q\n\ngot:\n%s", want, out)
+		}
+	}
+
+	off := &v1alpha1.HyperbytedbCluster{Spec: cluster.Spec}
+	off.Spec.Sharding = &v1alpha1.ShardingSpec{Enabled: false}
+	if ConfigHash(cluster) == ConfigHash(off) {
+		t.Fatal("ConfigHash must change when sharding.enabled changes")
 	}
 }
