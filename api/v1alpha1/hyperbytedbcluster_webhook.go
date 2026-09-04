@@ -150,20 +150,17 @@ func validateCluster(cluster *HyperbytedbCluster) (admission.Warnings, error) {
 		warnings = append(warnings, "2-node clusters cannot tolerate any node failure; consider 3+ replicas")
 	}
 
-	if err := validateSharding(cluster, replicas); err != nil {
+	if err := validateSharding(cluster); err != nil {
 		return warnings, err
 	}
 
 	return warnings, nil
 }
 
-func validateSharding(cluster *HyperbytedbCluster, replicas int32) error {
+func validateSharding(cluster *HyperbytedbCluster) error {
 	s := cluster.Spec.Sharding
 	if s == nil {
 		return nil
-	}
-	if s.Enabled && replicas < 2 {
-		return fmt.Errorf("sharding.enabled requires replicas > 1 (cluster mode)")
 	}
 	if s.RegionMergeSeries > 0 && s.RegionSplitSeries > 0 && s.RegionMergeSeries >= s.RegionSplitSeries {
 		return fmt.Errorf("sharding.regionMergeSeries (%d) must be < regionSplitSeries (%d)",

@@ -36,7 +36,7 @@ func BuildStatefulSet(cluster *v1alpha1.HyperbytedbCluster, configHash string) *
 		replicas = *cluster.Spec.Replicas
 	}
 	port := serverPort(cluster)
-	clusterEnabled := replicas > 1
+	clusterEnabled := clusterMetadataEnabled(cluster)
 	headlessSvc := HeadlessServiceName(cluster)
 
 	image := ResolveHyperbytedbImage(cluster)
