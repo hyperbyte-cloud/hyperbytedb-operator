@@ -47,3 +47,6 @@ known_hosts
 
 # Stray native artifacts (not part of this Go operator)
 chdb.hpp
+
+# Linked git worktrees
+.worktrees/

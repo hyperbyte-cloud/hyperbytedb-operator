@@ -18,10 +18,9 @@ func TestValidateSharding(t *testing.T) {
 	}{
 		{name: "nil sharding", replicas: 1},
 		{
-			name:     "enabled requires cluster",
+			name:     "enabled on single replica is a one-member cluster",
 			replicas: 1,
 			sharding: &ShardingSpec{Enabled: true},
-			wantErr:  "replicas > 1",
 		},
 		{
 			name:     "enabled on 3 replicas",
@@ -74,7 +73,7 @@ func TestValidateSharding(t *testing.T) {
 					Sharding: tt.sharding,
 				},
 			}
-			err := validateSharding(cluster, tt.replicas)
+			err := validateSharding(cluster)
 			if tt.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)

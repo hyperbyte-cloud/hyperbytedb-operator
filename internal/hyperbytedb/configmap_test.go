@@ -110,6 +110,32 @@ func TestConfigHash_ignoresReplicaCount(t *testing.T) {
 	}
 }
 
+func TestRenderConfigTOML_oneReplicaExplicitShardingIsCluster(t *testing.T) {
+	cluster := &v1alpha1.HyperbytedbCluster{
+		Spec: v1alpha1.HyperbytedbClusterSpec{
+			Replicas: ptr.To(int32(1)),
+			Sharding: &v1alpha1.ShardingSpec{Enabled: true},
+		},
+	}
+	out := renderConfigTOML(cluster)
+	if !strings.Contains(out, "[cluster]") {
+		t.Fatal("expected [cluster] section")
+	}
+	// First `enabled = true` in the file is [cluster] (sharding follows).
+	clusterIdx := strings.Index(out, "[cluster]")
+	shardIdx := strings.Index(out, "[sharding]")
+	if clusterIdx < 0 || shardIdx < 0 || shardIdx < clusterIdx {
+		t.Fatalf("expected [cluster] then [sharding]\n%s", out)
+	}
+	clusterBlock := out[clusterIdx:shardIdx]
+	if !strings.Contains(clusterBlock, "enabled = true") {
+		t.Fatalf("1-replica explicit sharding must set [cluster] enabled=true\n%s", clusterBlock)
+	}
+	if !strings.Contains(out[shardIdx:], "enabled = true") {
+		t.Fatalf("expected sharding.enabled=true\n%s", out)
+	}
+}
+
 func TestRenderConfigTOML_sharding(t *testing.T) {
 	cluster := &v1alpha1.HyperbytedbCluster{
 		Spec: v1alpha1.HyperbytedbClusterSpec{
