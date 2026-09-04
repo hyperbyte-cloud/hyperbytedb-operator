@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -187,7 +186,7 @@ func (r *HyperbytedbRestoreReconciler) checkRestoreJob(ctx context.Context, rest
 	anyFailed := false
 
 	for i := int32(0); i < replicas; i++ {
-		jobName := fmt.Sprintf("%s-restore-%d", restore.Name, i)
+		jobName := fmt.Sprintf("%s-%d", restore.Name, i)
 		job := &batchv1.Job{}
 		if err := r.Get(ctx, types.NamespacedName{Name: jobName, Namespace: restore.Namespace}, job); err != nil {
 			if apierrors.IsNotFound(err) {
@@ -246,65 +245,9 @@ func (r *HyperbytedbRestoreReconciler) buildRestoreJob(
 	s3Source *hyperbytedbv1alpha1.S3BackupSpec,
 	ordinal int32,
 ) *batchv1.Job {
-	image := hyperbytedb.ResolveHyperbytedbImage(cluster)
-
-	s3Path := s3Source.Bucket
-	if s3Source.Prefix != "" {
-		s3Path += "/" + strings.TrimSuffix(s3Source.Prefix, "/")
-	}
-
-	syncCmd := fmt.Sprintf(`aws s3 sync "s3://%s/" /tmp/backup/`, s3Path)
-	if s3Source.Endpoint != "" {
-		syncCmd = fmt.Sprintf(`aws s3 sync "s3://%s/" /tmp/backup/ --endpoint-url "%s"`, s3Path, s3Source.Endpoint)
-	}
-
-	restoreScript := fmt.Sprintf(`#!/bin/sh
-set -e
-echo "Downloading backup from S3..."
-%s
-RESTORE_DIR="/tmp/backup"
-if [ ! -f "${RESTORE_DIR}/manifest.json" ]; then
-  SUBDIR=$(find "${RESTORE_DIR}" -maxdepth 1 -mindepth 1 -type d | sort -r | head -1)
-  if [ -n "${SUBDIR}" ] && [ -f "${SUBDIR}/manifest.json" ]; then
-    RESTORE_DIR="${SUBDIR}"
-    echo "Found backup in subdirectory: ${RESTORE_DIR}"
-  fi
-fi
-echo "Restoring data to PVC..."
-hyperbytedb restore --input "${RESTORE_DIR}"
-echo "Restore complete for ordinal %d"
-`, syncCmd, ordinal)
-
-	env := []corev1.EnvVar{}
-	if s3Source.CredentialsSecretName != "" {
-		env = append(env,
-			corev1.EnvVar{
-				Name: "AWS_ACCESS_KEY_ID",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: s3Source.CredentialsSecretName},
-						Key:                  "access_key_id",
-					},
-				},
-			},
-			corev1.EnvVar{
-				Name: "AWS_SECRET_ACCESS_KEY",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: s3Source.CredentialsSecretName},
-						Key:                  "secret_access_key",
-					},
-				},
-			},
-		)
-	}
-	if s3Source.Region != "" {
-		env = append(env, corev1.EnvVar{Name: "AWS_DEFAULT_REGION", Value: s3Source.Region})
-	}
-
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("%s-restore-%d", restore.Name, ordinal),
+			Name:      fmt.Sprintf("%s-%d", restore.Name, ordinal),
 			Namespace: restore.Namespace,
 			Labels:    hyperbytedb.CommonLabels(cluster),
 		},
@@ -312,27 +255,12 @@ echo "Restore complete for ordinal %d"
 			BackoffLimit: ptr.To(int32(2)),
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyOnFailure,
-					Containers: []corev1.Container{
-						{
-							Name:    "restore",
-							Image:   image,
-							Command: []string{"sh", "-c", restoreScript},
-							Env:     env,
-							VolumeMounts: []corev1.VolumeMount{
-								{Name: "data", MountPath: "/var/lib/hyperbytedb"},
-							},
-						},
-					},
+					RestartPolicy:  corev1.RestartPolicyOnFailure,
+					InitContainers: []corev1.Container{mcDownloadInitContainer(*s3Source)},
+					Containers:     []corev1.Container{restoreDataContainer(hyperbytedb.ResolveHyperbytedbImage(cluster), ordinal)},
 					Volumes: []corev1.Volume{
-						{
-							Name: "data",
-							VolumeSource: corev1.VolumeSource{
-								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: fmt.Sprintf("data-%s-%d", cluster.Name, ordinal),
-								},
-							},
-						},
+						dataVolume(cluster.Name, ordinal, false),
+						snapshotVolume(),
 					},
 				},
 			},

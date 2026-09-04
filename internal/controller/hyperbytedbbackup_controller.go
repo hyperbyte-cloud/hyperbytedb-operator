@@ -207,94 +207,7 @@ func (r *HyperbytedbBackupReconciler) reconcileCronJob(ctx context.Context, back
 }
 
 func (r *HyperbytedbBackupReconciler) buildBackupJob(backup *hyperbytedbv1alpha1.HyperbytedbBackup, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, name string) *batchv1.Job {
-	image := hyperbytedb.ResolveHyperbytedbImage(cluster)
-
 	s3 := backup.Spec.Destination.S3
-	s3Path := r.buildBackupS3Path(backup)
-
-	backupScript := fmt.Sprintf(`#!/bin/sh
-set -e
-BACKUP_DIR="/tmp/backup"
-TIMESTAMP=$(date +%%Y%%m%%d-%%H%%M%%S)
-S3_DEST="s3://%s/${TIMESTAMP}/"
-
-echo "Starting hyperbytedb backup..."
-hyperbytedb backup --output "${BACKUP_DIR}"
-
-BACKUP_SIZE=$(du -sh "${BACKUP_DIR}" | cut -f1)
-echo "Backup size: ${BACKUP_SIZE}"
-
-echo "Uploading to ${S3_DEST}..."
-`, s3Path)
-
-	if s3.Endpoint != "" {
-		backupScript += fmt.Sprintf(`aws s3 sync "${BACKUP_DIR}" "${S3_DEST}" --endpoint-url "%s"
-`, s3.Endpoint)
-	} else {
-		backupScript += `aws s3 sync "${BACKUP_DIR}" "${S3_DEST}"
-`
-	}
-
-	backupScript += fmt.Sprintf(`
-echo "Cleaning up backups older than %d days..."
-`, backup.Spec.RetentionDays)
-
-	if s3.Endpoint != "" {
-		backupScript += fmt.Sprintf(`CUTOFF=$(date -d "-%d days" +%%Y%%m%%d-000000 2>/dev/null || date -v -%dd +%%Y%%m%%d-000000 2>/dev/null || echo "")
-if [ -n "$CUTOFF" ]; then
-  aws s3 ls "s3://%s/" --endpoint-url "%s" | while read -r line; do
-    DIR=$(echo "$line" | awk '{print $NF}' | tr -d '/')
-    if [ "$DIR" \< "$CUTOFF" ] 2>/dev/null; then
-      echo "Removing old backup: ${DIR}"
-      aws s3 rm "s3://%s/${DIR}/" --recursive --endpoint-url "%s"
-    fi
-  done
-fi
-`, backup.Spec.RetentionDays, backup.Spec.RetentionDays, s3Path, s3.Endpoint, s3Path, s3.Endpoint)
-	} else {
-		backupScript += fmt.Sprintf(`CUTOFF=$(date -d "-%d days" +%%Y%%m%%d-000000 2>/dev/null || date -v -%dd +%%Y%%m%%d-000000 2>/dev/null || echo "")
-if [ -n "$CUTOFF" ]; then
-  aws s3 ls "s3://%s/" | while read -r line; do
-    DIR=$(echo "$line" | awk '{print $NF}' | tr -d '/')
-    if [ "$DIR" \< "$CUTOFF" ] 2>/dev/null; then
-      echo "Removing old backup: ${DIR}"
-      aws s3 rm "s3://%s/${DIR}/" --recursive
-    fi
-  done
-fi
-`, backup.Spec.RetentionDays, backup.Spec.RetentionDays, s3Path, s3Path)
-	}
-
-	backupScript += `echo "Backup complete"
-`
-
-	env := []corev1.EnvVar{}
-	if s3.CredentialsSecretName != "" {
-		env = append(env,
-			corev1.EnvVar{
-				Name: "AWS_ACCESS_KEY_ID",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: s3.CredentialsSecretName},
-						Key:                  "access_key_id",
-					},
-				},
-			},
-			corev1.EnvVar{
-				Name: "AWS_SECRET_ACCESS_KEY",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: s3.CredentialsSecretName},
-						Key:                  "secret_access_key",
-					},
-				},
-			},
-		)
-	}
-	if s3.Region != "" {
-		env = append(env, corev1.EnvVar{Name: "AWS_DEFAULT_REGION", Value: s3.Region})
-	}
-
 	return &batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
@@ -305,28 +218,12 @@ fi
 			BackoffLimit: ptr.To(int32(3)),
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
-					RestartPolicy: corev1.RestartPolicyOnFailure,
-					Containers: []corev1.Container{
-						{
-							Name:    "backup",
-							Image:   image,
-							Command: []string{"sh", "-c", backupScript},
-							Env:     env,
-							VolumeMounts: []corev1.VolumeMount{
-								{Name: "data", MountPath: "/var/lib/hyperbytedb", ReadOnly: true},
-							},
-						},
-					},
+					RestartPolicy:  corev1.RestartPolicyOnFailure,
+					InitContainers: []corev1.Container{snapshotBackupInitContainer(hyperbytedb.ResolveHyperbytedbImage(cluster))},
+					Containers:     []corev1.Container{mcUploadContainer(s3, backup.Spec.RetentionDays)},
 					Volumes: []corev1.Volume{
-						{
-							Name: "data",
-							VolumeSource: corev1.VolumeSource{
-								PersistentVolumeClaim: &corev1.PersistentVolumeClaimVolumeSource{
-									ClaimName: fmt.Sprintf("data-%s-0", cluster.Name),
-									ReadOnly:  true,
-								},
-							},
-						},
+						dataVolume(cluster.Name, 0, true),
+						snapshotVolume(),
 					},
 				},
 			},
