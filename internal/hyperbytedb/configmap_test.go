@@ -136,6 +136,37 @@ func TestRenderConfigTOML_oneReplicaExplicitShardingIsCluster(t *testing.T) {
 	}
 }
 
+// The opt-out half of the one-member-cluster rule: only *explicit* sharding
+// turns a 1-replica CR into a cluster. Disabling sharding must leave it
+// cluster-off, exactly as omitting the block does.
+func TestRenderConfigTOML_oneReplicaDisabledShardingStaysClusterOff(t *testing.T) {
+	for name, sharding := range map[string]*v1alpha1.ShardingSpec{
+		"omitted":  nil,
+		"disabled": {Enabled: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cluster := &v1alpha1.HyperbytedbCluster{
+				Spec: v1alpha1.HyperbytedbClusterSpec{
+					Replicas: ptr.To(int32(1)),
+					Sharding: sharding,
+				},
+			}
+			out := renderConfigTOML(cluster)
+			clusterIdx := strings.Index(out, "[cluster]")
+			if clusterIdx < 0 {
+				t.Fatalf("expected [cluster] section\n%s", out)
+			}
+			end := len(out)
+			if shardIdx := strings.Index(out, "[sharding]"); shardIdx > clusterIdx {
+				end = shardIdx
+			}
+			if !strings.Contains(out[clusterIdx:end], "enabled = false") {
+				t.Fatalf("1-replica without explicit sharding must stay cluster-off\n%s", out[clusterIdx:end])
+			}
+		})
+	}
+}
+
 func TestRenderConfigTOML_sharding(t *testing.T) {
 	cluster := &v1alpha1.HyperbytedbCluster{
 		Spec: v1alpha1.HyperbytedbClusterSpec{
