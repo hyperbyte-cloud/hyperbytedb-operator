@@ -77,7 +77,8 @@ type HyperbytedbClusterSpec struct {
 	Cluster ClusterTuningSpec `json:"cluster,omitempty"`
 
 	// Experimental series sharding. When set, the operator writes a `[sharding]`
-	// block into config.toml. Enabling it requires replicas > 1 (cluster mode).
+	// block into config.toml. A 1-replica CR with sharding.enabled is a
+	// 1-member cluster ([cluster] enabled=true). Defaults stay off.
 	// +optional
 	Sharding *ShardingSpec `json:"sharding,omitempty"`
 

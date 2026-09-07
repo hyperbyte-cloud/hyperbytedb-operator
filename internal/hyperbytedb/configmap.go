@@ -58,7 +58,12 @@ func clusterMetadataEnabled(cluster *v1alpha1.HyperbytedbCluster) bool {
 	if cluster.Spec.Replicas != nil {
 		replicas = *cluster.Spec.Replicas
 	}
-	return replicas > 1
+	if replicas > 1 {
+		return true
+	}
+	// A 1-replica CR with explicit sharding is a 1-member cluster, not
+	// cluster-off. Defaults stay off when sharding is omitted or disabled.
+	return cluster.Spec.Sharding != nil && cluster.Spec.Sharding.Enabled
 }
 
 func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, clusterEnabled bool) string {
