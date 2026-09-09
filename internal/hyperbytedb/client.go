@@ -40,9 +40,15 @@ type NodeInfo struct {
 
 // HealthStatus represents the structured response from /health.
 type HealthStatus struct {
-	Status  string `json:"status"` // "pass" (healthy), "syncing", "joining", "draining", "leaving"
+	Status  string `json:"status"` // "pass" (healthy), "warn", "fail"
 	Message string `json:"message,omitempty"`
 	NodeID  int    `json:"node_id,omitempty"`
+	// State is the node's own membership record: "active", "syncing",
+	// "joining", "draining", "decommissioning", "leaving". Omitted before
+	// bootstrap or on a standalone node. This is the field to gate on, not
+	// Status -- Status only says whether the node is serving traffic, and a
+	// draining node and a fully evacuated one both report "warn".
+	State string `json:"state,omitempty"`
 }
 
 // clusterNodesResponse wraps the /cluster/nodes JSON envelope.
@@ -113,6 +119,30 @@ func (c *Client) DrainNode(ctx context.Context, host string, port int32) error {
 		resp.StatusCode != http.StatusAccepted {
 		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("drain returned %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// DecommissionNode tells a node it is leaving permanently: hand off its
+// primaries, then let the cluster evacuate its regions. Unlike DrainNode this
+// makes the node ineligible to hold data, so it must only be called on a node
+// that is actually being removed -- never on a restart.
+func (c *Client) DecommissionNode(ctx context.Context, host string, port int32) error {
+	url := fmt.Sprintf("http://%s:%d/internal/decommission", host, port)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK &&
+		resp.StatusCode != http.StatusNoContent &&
+		resp.StatusCode != http.StatusAccepted {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("decommission returned %d: %s", resp.StatusCode, string(respBody))
 	}
 	return nil
 }

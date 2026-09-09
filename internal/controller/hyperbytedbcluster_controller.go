@@ -170,7 +170,12 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// 5b. Scale-down: drain departing pods and notify survivors before the StatefulSet shrinks.
 	// Errors per-pod are already logged inside the hook and intentionally non-fatal.
-	r.runScaleDownClusterHooks(ctx, cluster, prevSTSReplicas, replicas)
+	if !r.runScaleDownClusterHooks(ctx, cluster, prevSTSReplicas, replicas) {
+		// Regions are still moving off a departing node. Hold .spec.replicas
+		// where it is and check again shortly; shrinking now would delete a
+		// pod, and later its volume, mid-transfer.
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
 
 	// 6. StatefulSet
 	stsResult, err := r.reconcileStatefulSet(ctx, cluster, configHash)
@@ -783,9 +788,18 @@ func (r *HyperbytedbClusterReconciler) includeFromAllProxies(
 // surviving members to drop them from membership. Must run before .spec.replicas is reduced.
 // Per-pod failures are logged and ignored: the StatefulSet scale-down still proceeds because
 // the membership/drain endpoints are best-effort hints to surviving nodes.
-func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, prevReplicas, desiredReplicas int32) {
+// runScaleDownClusterHooks decommissions the pods that are leaving and reports
+// whether they have finished evacuating.
+//
+// Returns false while any departing node still owns regions. The caller must
+// not reduce .spec.replicas until it returns true: deleting the pod (and, on
+// the next pass, its PVC) while regions are still moving off it destroys the
+// only remaining copy of whatever had not yet transferred. Evacuation time is
+// a function of how much data the node holds, so no fixed grace period is
+// safe -- the node itself reports when it is done, by reaching "leaving".
+func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, prevReplicas, desiredReplicas int32) bool {
 	if desiredReplicas >= prevReplicas || prevReplicas < 1 {
-		return
+		return true
 	}
 
 	log := logf.FromContext(ctx)
@@ -793,12 +807,45 @@ func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Cont
 	stsName := hyperbytedb.StatefulSetName(cluster)
 	headlessSvc := hyperbytedb.HeadlessServiceName(cluster)
 
+	// Highest ordinal first, matching the order the StatefulSet will remove
+	// them, and one at a time: decommissioning every departing node at once
+	// would pull them all out of the placement pool together while the
+	// StatefulSet is still terminating only the first.
+	evacuated := true
 	for i := prevReplicas - 1; i >= desiredReplicas; i-- {
 		host := fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local",
 			stsName, i, headlessSvc, cluster.Namespace)
-		if err := r.Members.Client.DrainNode(ctx, host, port); err != nil {
-			log.V(1).Info("Could not drain departing pod", "ordinal", i, "host", host, "error", err)
+
+		health, err := r.Members.Client.GetNodeHealth(ctx, host, port)
+		state := ""
+		if health != nil {
+			state = health.State
 		}
+		tell, gate := departingNodeAction(state, err == nil)
+		if err != nil {
+			log.V(1).Info("Departing pod unreachable; not gating on it",
+				"ordinal", i, "host", host, "error", err)
+		}
+
+		if tell {
+			if err := r.Members.Client.DecommissionNode(ctx, host, port); err != nil {
+				log.V(1).Info("Could not decommission departing pod",
+					"ordinal", i, "host", host, "error", err)
+			}
+		}
+
+		if gate {
+			log.Info("Waiting for departing node to finish evacuating",
+				"ordinal", i, "host", host, "state", state)
+			evacuated = false
+			// One at a time: do not start the next node's evacuation until
+			// this one has released its regions.
+			break
+		}
+	}
+
+	if !evacuated {
+		return false
 	}
 
 	for i := desiredReplicas; i < prevReplicas; i++ {
@@ -811,6 +858,36 @@ func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Cont
 					"survivor", survivor, "departedNodeID", departedID, "error", err)
 			}
 		}
+	}
+	return true
+}
+
+const (
+	// Node states reported by /health's "state" field.
+	nodeStateDecommissioning = "decommissioning"
+	nodeStateLeaving         = "leaving"
+)
+
+// departingNodeAction decides what to do with one node that is being removed.
+//
+// `gate` false means .spec.replicas must not shrink yet. An unreachable node
+// never gates: it may already be gone, and the cluster's own dead-peer path
+// restores replication factor, so blocking forever on a pod that will never
+// answer would wedge every future scale-down.
+func departingNodeAction(state string, reachable bool) (decommission bool, gate bool) {
+	if !reachable {
+		return false, false
+	}
+	switch state {
+	case nodeStateLeaving:
+		// Fully evacuated; safe to delete the pod and its volume.
+		return false, false
+	case nodeStateDecommissioning:
+		// Already told; still moving regions.
+		return false, true
+	default:
+		// Still holding data and not yet told to leave.
+		return true, true
 	}
 }
 
