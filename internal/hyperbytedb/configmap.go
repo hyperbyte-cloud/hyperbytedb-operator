@@ -397,6 +397,14 @@ func writeShardingSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterS
 	if s.PrimaryFailoverAfterSecs > 0 {
 		fmt.Fprintf(b, "primary_failover_after_secs = %d\n", s.PrimaryFailoverAfterSecs)
 	}
+	// Emitted only when explicitly set, so the server keeps its own default
+	// (on) rather than this silently pinning the value.
+	if s.AddPeerProposalsEnabled != nil {
+		fmt.Fprintf(b, "add_peer_proposals_enabled = %t\n", *s.AddPeerProposalsEnabled)
+	}
+	if s.RemovePeerProposalsEnabled != nil {
+		fmt.Fprintf(b, "remove_peer_proposals_enabled = %t\n", *s.RemovePeerProposalsEnabled)
+	}
 	if s.ScatterPeerTimeoutMs > 0 {
 		fmt.Fprintf(b, "scatter_peer_timeout_ms = %d\n", s.ScatterPeerTimeoutMs)
 	}

@@ -388,6 +388,23 @@ type ShardingSpec struct {
 	// +kubebuilder:validation:Minimum=1
 	ScatterMaxPeerAttempts int32 `json:"scatterMaxPeerAttempts,omitempty"`
 
+	// Propose AddPeer shard-map ops. Defaults to true when unset.
+	//
+	// Set false for the duration of a rolling upgrade of a sharded cluster: a
+	// node running a build that predates the op cannot decode it, rejects the
+	// Raft append RPC carrying it, and stops replicating until every node is
+	// upgraded. Re-enable once the rollout completes.
+	// +optional
+	AddPeerProposalsEnabled *bool `json:"addPeerProposalsEnabled,omitempty"`
+
+	// Propose RemovePeer shard-map ops. Defaults to true when unset.
+	//
+	// Carries the identical rolling-upgrade hazard as AddPeerProposalsEnabled,
+	// and scale-down evacuation depends on it: leaving it false prevents a
+	// decommissioning node from ever releasing its regions.
+	// +optional
+	RemovePeerProposalsEnabled *bool `json:"removePeerProposalsEnabled,omitempty"`
+
 	// Load-based split QPS threshold; 0 = disabled. Emitted only when set so the
 	// server default (0) applies when omitted.
 	// +optional

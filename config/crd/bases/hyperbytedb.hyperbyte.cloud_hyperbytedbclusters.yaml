@@ -3595,6 +3595,15 @@ spec:
                   block into config.toml. A 1-replica CR with sharding.enabled is a
                   1-member cluster ([cluster] enabled=true). Defaults stay off.
                 properties:
+                  addPeerProposalsEnabled:
+                    description: |-
+                      Propose AddPeer shard-map ops. Defaults to true when unset.
+
+                      Set false for the duration of a rolling upgrade of a sharded cluster: a
+                      node running a build that predates the op cannot decode it, rejects the
+                      Raft append RPC carrying it, and stops replicating until every node is
+                      upgraded. Re-enable once the rollout completes.
+                    type: boolean
                   bootstrapTimeoutMs:
                     description: Sync bootstrap RPC timeout.
                     format: int64
@@ -3644,6 +3653,14 @@ spec:
                     format: int64
                     minimum: 1
                     type: integer
+                  removePeerProposalsEnabled:
+                    description: |-
+                      Propose RemovePeer shard-map ops. Defaults to true when unset.
+
+                      Carries the identical rolling-upgrade hazard as AddPeerProposalsEnabled,
+                      and scale-down evacuation depends on it: leaving it false prevents a
+                      decommissioning node from ever releasing its regions.
+                    type: boolean
                   replicationFactor:
                     description: Target replica count per shard region.
                     format: int32
