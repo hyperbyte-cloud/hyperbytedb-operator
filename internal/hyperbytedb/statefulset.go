@@ -139,10 +139,21 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 	if cluster.Spec.ChDB.SessionDataPath != "" {
 		chdbPath = cluster.Spec.ChDB.SessionDataPath
 	}
+	// The image bakes HYPERBYTEDB__LOGGING__LEVEL=info, and the HYPERBYTEDB__*
+	// env overlay is applied OVER the mounted config.toml. Rendering the level
+	// into the ConfigMap alone therefore did nothing -- spec.logging.level was
+	// inert, and a sharded cluster could not be put into debug to diagnose a
+	// placement or staging failure at all. Set it as env, like the four other
+	// image defaults this block already restates, so the CR field wins.
+	logLevel := "info"
+	if cluster.Spec.Logging.Level != "" {
+		logLevel = cluster.Spec.Logging.Level
+	}
 	env := []corev1.EnvVar{
 		{Name: "HYPERBYTEDB__STORAGE__WAL_DIR", Value: defaultWalDir},
 		{Name: "HYPERBYTEDB__STORAGE__META_DIR", Value: defaultMetaDir},
 		{Name: "HYPERBYTEDB__CHDB__SESSION_DATA_PATH", Value: chdbPath},
+		{Name: "HYPERBYTEDB__LOGGING__LEVEL", Value: logLevel},
 	}
 	// Cluster mode and paths come from mounted config.toml (hot-updated on scale);
 	// avoid replica-dependent env vars so the pod template stays stable across scale events.
