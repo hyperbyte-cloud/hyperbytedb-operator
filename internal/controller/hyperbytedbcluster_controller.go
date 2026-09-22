@@ -1234,10 +1234,23 @@ func (r *HyperbytedbClusterReconciler) reconcileClusterMembership(
 	}
 
 	// The leader's view is authoritative for who is currently a member.
+	//
+	// A node the leader still lists as departed is NOT a current member. A
+	// StatefulSet keeps its PVCs on scale-down, so scaling back up restarts the
+	// same node id with its old `leaving` state, which is terminal on the
+	// database side. Treating it as known skipped add-node, so the node failed
+	// readiness forever and a cluster that had scaled down could not scale back
+	// up. Sending add-node for it is what lets the leader re-admit it.
+	//
+	// Safe against undoing a scale-down: `views` holds only ordinals below
+	// spec.replicas, so a pod still being evacuated is never in it.
 	knownIDs := make(map[uint64]bool)
 	for _, v := range views {
 		if v.host == leaderHost {
 			for _, n := range v.nodes {
+				if isDepartedState(n.State) {
+					continue
+				}
 				knownIDs[uint64(n.NodeID)] = true
 			}
 		}
@@ -1513,4 +1526,15 @@ func (r *HyperbytedbClusterReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		Owns(&policyv1.PodDisruptionBudget{}).
 		Named("hyperbytedbcluster").
 		Complete(r)
+}
+
+// isDepartedState reports whether a membership state means the node was
+// removed (decommissioned or retired) rather than merely restarting.
+func isDepartedState(state string) bool {
+	switch state {
+	case "leaving", "decommissioning":
+		return true
+	default:
+		return false
+	}
 }
