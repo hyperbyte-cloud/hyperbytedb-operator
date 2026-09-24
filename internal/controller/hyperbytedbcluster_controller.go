@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"sort"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -848,6 +849,28 @@ func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Cont
 		return false
 	}
 
+	// Drop the departing nodes from the Raft voter set before the StatefulSet
+	// deletes them. Without this they stay voters forever: shrinking 6 -> 3
+	// left 3 of 6 voters alive, which is no quorum, so the smaller cluster
+	// could not commit anything. Worse, scaling back up brought the same node
+	// ids back with empty disks while the leader still held their old
+	// progress; openraft does not support that ("log reversion") and the
+	// returning nodes crashed on their first apply.
+	hosts := make(map[uint64]string, prevReplicas)
+	for i := range prevReplicas {
+		hosts[uint64(i+1)] = fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local",
+			stsName, i, headlessSvc, cluster.Namespace)
+	}
+	departed := make([]uint64, 0, prevReplicas-desiredReplicas)
+	for i := prevReplicas - 1; i >= desiredReplicas; i-- {
+		departed = append(departed, uint64(i+1))
+	}
+	if err := removeDepartedVoters(ctx, r.Members.Client, hosts, port, departed); err != nil {
+		log.Info("Holding scale-down: could not remove departing nodes from raft voters",
+			"error", err)
+		return false
+	}
+
 	for i := desiredReplicas; i < prevReplicas; i++ {
 		departedID := uint64(i + 1)
 		for j := range desiredReplicas {
@@ -860,6 +883,45 @@ func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Cont
 		}
 	}
 	return true
+}
+
+// removeDepartedVoters removes each id in `departed` from the Raft voter set,
+// in order. The leader is looked up again before every removal because
+// removing the leader itself makes it step down.
+//
+// A node that is already not a voter counts as removed, so a retry after a
+// partial failure is safe.
+func removeDepartedVoters(ctx context.Context, c *hyperbytedb.Client, hosts map[uint64]string, port int32, departed []uint64) error {
+	for _, id := range departed {
+		leaderHost, err := raftLeaderHost(ctx, c, hosts, port)
+		if err != nil {
+			return err
+		}
+		if _, err := c.RemoveClusterNode(ctx, leaderHost, port, id); err != nil {
+			return fmt.Errorf("remove node %d from raft voters via %s: %w", id, leaderHost, err)
+		}
+	}
+	return nil
+}
+
+// raftLeaderHost asks each host who the leader is and returns the leader's
+// host. `hosts` maps node id to host.
+func raftLeaderHost(ctx context.Context, c *hyperbytedb.Client, hosts map[uint64]string, port int32) (string, error) {
+	ids := make([]uint64, 0, len(hosts))
+	for id := range hosts {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	for _, id := range ids {
+		info, err := c.GetClusterLeader(ctx, hosts[id], port)
+		if err != nil || info.LeaderID == nil {
+			continue
+		}
+		if h, ok := hosts[*info.LeaderID]; ok {
+			return h, nil
+		}
+	}
+	return "", fmt.Errorf("no raft leader visible")
 }
 
 const (
