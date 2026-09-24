@@ -28,6 +28,13 @@ func ServerPort(cluster *v1alpha1.HyperbytedbCluster) int32 {
 	return 8086
 }
 
+// ControlPort is the node's control listener: liveness and Raft RPCs,
+// served on a dedicated runtime in the database so write saturation cannot
+// starve them. Always the server port + 1.
+func ControlPort(cluster *v1alpha1.HyperbytedbCluster) int32 {
+	return ServerPort(cluster) + 1
+}
+
 func BuildHeadlessService(cluster *v1alpha1.HyperbytedbCluster) *corev1.Service {
 	port := serverPort(cluster)
 	return &corev1.Service{

@@ -182,12 +182,22 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		probeScheme = corev1.URISchemeHTTPS
 	}
 
+	// Liveness goes to the control listener when clustering is on: it is
+	// served on the database's control runtime, so a node saturated with
+	// writes still answers. On the main port, /ping queued behind write work
+	// past the 3s timeout and kubelet killed busy but healthy nodes.
+	livenessPort := intstr.FromString("http")
+	livenessScheme := probeScheme
+	if clusterEnabled {
+		livenessPort = intstr.FromString("control")
+		livenessScheme = corev1.URISchemeHTTP
+	}
 	livenessProbe := &corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{
 				Path:   "/ping",
-				Port:   intstr.FromString("http"),
-				Scheme: probeScheme,
+				Port:   livenessPort,
+				Scheme: livenessScheme,
 			},
 		},
 		InitialDelaySeconds: 15,
@@ -237,18 +247,12 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		ImagePullPolicy: pullPolicy,
 		Command:         []string{"sh", "/entrypoint/start.sh"},
 		Env:             env,
-		Ports: []corev1.ContainerPort{
-			{
-				Name:          "http",
-				ContainerPort: port,
-				Protocol:      corev1.ProtocolTCP,
-			},
-		},
-		VolumeMounts:   volumeMounts,
-		StartupProbe:   startupProbe,
-		LivenessProbe:  livenessProbe,
-		ReadinessProbe: readinessProbe,
-		Resources:      cluster.Spec.Resources,
+		Ports:           containerPorts(port, clusterEnabled, ControlPort(cluster)),
+		VolumeMounts:    volumeMounts,
+		StartupProbe:    startupProbe,
+		LivenessProbe:   livenessProbe,
+		ReadinessProbe:  readinessProbe,
+		Resources:       cluster.Spec.Resources,
 	}
 
 	if clusterEnabled {
@@ -384,4 +388,22 @@ for i in $(seq 1 %[2]d); do
   sleep 1
 done
 exit 0`, port, drainAckWaitSecs)
+}
+
+// containerPorts lists the main port and, with clustering on, the control
+// listener's port.
+func containerPorts(port int32, clusterEnabled bool, controlPort int32) []corev1.ContainerPort {
+	ports := []corev1.ContainerPort{{
+		Name:          "http",
+		ContainerPort: port,
+		Protocol:      corev1.ProtocolTCP,
+	}}
+	if clusterEnabled {
+		ports = append(ports, corev1.ContainerPort{
+			Name:          "control",
+			ContainerPort: controlPort,
+			Protocol:      corev1.ProtocolTCP,
+		})
+	}
+	return ports
 }
