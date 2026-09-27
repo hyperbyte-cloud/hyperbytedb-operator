@@ -182,13 +182,14 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		probeScheme = corev1.URISchemeHTTPS
 	}
 
-	// Liveness goes to the control listener when clustering is on: it is
+	// Liveness goes to the control listener when the cluster opts in: it is
 	// served on the database's control runtime, so a node saturated with
 	// writes still answers. On the main port, /ping queued behind write work
 	// past the 3s timeout and kubelet killed busy but healthy nodes.
 	livenessPort := intstr.FromString("http")
 	livenessScheme := probeScheme
-	if clusterEnabled {
+	controlListener := ControlListenerEnabled(cluster, clusterEnabled)
+	if controlListener {
 		livenessPort = intstr.FromString("control")
 		livenessScheme = corev1.URISchemeHTTP
 	}
@@ -247,7 +248,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		ImagePullPolicy: pullPolicy,
 		Command:         []string{"sh", "/entrypoint/start.sh"},
 		Env:             env,
-		Ports:           containerPorts(port, clusterEnabled, ControlPort(cluster)),
+		Ports:           containerPorts(port, controlListener, ControlPort(cluster)),
 		VolumeMounts:    volumeMounts,
 		StartupProbe:    startupProbe,
 		LivenessProbe:   livenessProbe,
@@ -390,15 +391,15 @@ done
 exit 0`, port, drainAckWaitSecs)
 }
 
-// containerPorts lists the main port and, with clustering on, the control
+// containerPorts lists the main port and, when enabled, the control
 // listener's port.
-func containerPorts(port int32, clusterEnabled bool, controlPort int32) []corev1.ContainerPort {
+func containerPorts(port int32, controlListener bool, controlPort int32) []corev1.ContainerPort {
 	ports := []corev1.ContainerPort{{
 		Name:          "http",
 		ContainerPort: port,
 		Protocol:      corev1.ProtocolTCP,
 	}}
-	if clusterEnabled {
+	if controlListener {
 		ports = append(ports, corev1.ContainerPort{
 			Name:          "control",
 			ContainerPort: controlPort,

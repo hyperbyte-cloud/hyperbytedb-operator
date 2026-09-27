@@ -32,6 +32,7 @@ func TestClusteredLivenessUsesTheControlPort(t *testing.T) {
 	cluster := &v1alpha1.HyperbytedbCluster{
 		Spec: v1alpha1.HyperbytedbClusterSpec{Replicas: ptr.To(int32(3))},
 	}
+	cluster.Annotations = map[string]string{ControlListenerAnnotation: "true"}
 	port, ports := mainContainerOf(t, cluster)
 	if port != "control" {
 		t.Errorf("liveness port = %q, want control", port)
@@ -56,5 +57,21 @@ func TestSingleNodeKeepsLivenessOnTheMainPort(t *testing.T) {
 	}
 	if strings.Contains(renderConfigTOML(cluster), "control_port") {
 		t.Error("single node config must not set control_port")
+	}
+}
+
+// Opt-in: an existing cluster on a database build without the control
+// listener must keep liveness on the main port. Defaulting it on left a
+// 0.8.5-beta cluster restarting in a loop.
+func TestClusteredLivenessStaysOnTheMainPortWithoutOptIn(t *testing.T) {
+	cluster := &v1alpha1.HyperbytedbCluster{
+		Spec: v1alpha1.HyperbytedbClusterSpec{Replicas: ptr.To(int32(3))},
+	}
+	port, ports := mainContainerOf(t, cluster)
+	if port != "http" || strings.Join(ports, ",") != "http" {
+		t.Errorf("no opt-in: liveness %q ports %v, want http / [http]", port, ports)
+	}
+	if strings.Contains(renderConfigTOML(cluster), "control_port") {
+		t.Error("no opt-in: config must not set control_port")
 	}
 }

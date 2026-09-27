@@ -35,6 +35,18 @@ func ControlPort(cluster *v1alpha1.HyperbytedbCluster) int32 {
 	return ServerPort(cluster) + 1
 }
 
+// ControlListenerAnnotation opts a cluster into the control listener.
+const ControlListenerAnnotation = "hyperbytedb.hyperbyte.cloud/control-listener"
+
+// ControlListenerEnabled reports whether this cluster's pods get
+// control_port and a liveness probe on it. Opt-in, because only database
+// builds with the control listener serve that port: turning it on for every
+// clustered CR left an existing 0.8.5-beta cluster failing liveness on a
+// port nothing listened on, restarting in a loop.
+func ControlListenerEnabled(cluster *v1alpha1.HyperbytedbCluster, clusterEnabled bool) bool {
+	return clusterEnabled && cluster.Annotations[ControlListenerAnnotation] == "true"
+}
+
 func BuildHeadlessService(cluster *v1alpha1.HyperbytedbCluster) *corev1.Service {
 	port := serverPort(cluster)
 	return &corev1.Service{
