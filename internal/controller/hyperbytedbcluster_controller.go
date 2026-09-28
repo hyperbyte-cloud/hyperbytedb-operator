@@ -187,6 +187,11 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return r.setFailedStatus(ctx, cluster, "StatefulSetFailed", err)
 	}
 
+	// 6a. Finish a scale-down the StatefulSet controller cannot.
+	if err := r.deleteStuckDepartedPods(ctx, cluster, stsResult); err != nil {
+		return r.setFailedStatus(ctx, cluster, "ScaleDownFailed", err)
+	}
+
 	// 6b. Operator-driven rolling restart coordination. When the StatefulSet
 	// has a pending rolling update and the proxy is enabled, the operator
 	// orchestrates pod-by-pod exclusion from the proxy, drain wait, pod
@@ -380,6 +385,9 @@ func (r *HyperbytedbClusterReconciler) reconcileService(ctx context.Context, clu
 type stsReconcileResult struct {
 	SpecReplicas  int32
 	ReadyReplicas int32
+	// StatusReplicas is how many pods the StatefulSet currently has. It
+	// stays above SpecReplicas while a scale-down is still deleting pods.
+	StatusReplicas int32
 }
 
 func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, configHash string) (stsReconcileResult, error) {
@@ -432,8 +440,9 @@ func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context,
 	}
 
 	return stsReconcileResult{
-		SpecReplicas:  *existing.Spec.Replicas,
-		ReadyReplicas: existing.Status.ReadyReplicas,
+		SpecReplicas:   *existing.Spec.Replicas,
+		ReadyReplicas:  existing.Status.ReadyReplicas,
+		StatusReplicas: existing.Status.Replicas,
 	}, nil
 }
 
@@ -883,6 +892,58 @@ func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Cont
 		}
 	}
 	return true
+}
+
+// deleteStuckDepartedPods deletes the unready pods a scale-down has left
+// behind.
+//
+// .spec.replicas only shrinks after runScaleDownClusterHooks has confirmed
+// the departing nodes evacuated and removed them from the Raft voters, so
+// every pod at or above .spec.replicas is already out of the cluster. Such a
+// pod reports unready: it keeps campaigning for a cluster it is no longer in.
+// With OrderedReady the StatefulSet controller will not delete a pod while a
+// lower-ordinal pod is unready, so 12 -> 3 stalled with pods 3..11 alive and
+// pods 4..11 unready. The StatefulSet would delete these pods anyway; this
+// only removes the ordering block. Ready pods are left to the StatefulSet.
+func (r *HyperbytedbClusterReconciler) deleteStuckDepartedPods(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, sts stsReconcileResult) error {
+	if sts.StatusReplicas <= sts.SpecReplicas {
+		return nil
+	}
+	stsName := hyperbytedb.StatefulSetName(cluster)
+	pods := make([]*corev1.Pod, 0, sts.StatusReplicas-sts.SpecReplicas)
+	for i := sts.SpecReplicas; i < sts.StatusReplicas; i++ {
+		pod := &corev1.Pod{}
+		name := fmt.Sprintf("%s-%d", stsName, i)
+		if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: cluster.Namespace}, pod); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return err
+		}
+		pods = append(pods, pod)
+	}
+	for _, pod := range stuckDepartedPods(pods) {
+		if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("deleting departed pod %s: %w", pod.Name, err)
+		}
+		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, "ScaleDown",
+			"Deleted departed pod %s that blocked the StatefulSet scale-down", pod.Name)
+	}
+	return nil
+}
+
+// stuckDepartedPods picks, from pods above .spec.replicas, the ones the
+// StatefulSet controller would wait on forever: unready and not already
+// being deleted.
+func stuckDepartedPods(pods []*corev1.Pod) []*corev1.Pod {
+	var stuck []*corev1.Pod
+	for _, pod := range pods {
+		if pod.DeletionTimestamp != nil || isPodReady(pod) {
+			continue
+		}
+		stuck = append(stuck, pod)
+	}
+	return stuck
 }
 
 // removeDepartedVoters removes each id in `departed` from the Raft voter set,
