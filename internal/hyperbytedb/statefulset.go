@@ -344,7 +344,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 			Selector: &metav1.LabelSelector{
 				MatchLabels: CommonLabels(cluster),
 			},
-			PodManagementPolicy: podManagementPolicy(clusterEnabled),
+			PodManagementPolicy: podManagementPolicy(cluster, clusterEnabled),
 			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{
 				Type: appsv1.RollingUpdateStatefulSetStrategyType,
 			},
@@ -369,8 +369,17 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 	return sts
 }
 
-func podManagementPolicy(clusterEnabled bool) appsv1.PodManagementPolicyType {
-	if clusterEnabled {
+// ParallelPodsAnnotation opts a cluster into Parallel pod management.
+const ParallelPodsAnnotation = "hyperbytedb.hyperbyte.cloud/parallel-pods"
+
+// podManagementPolicy is OrderedReady for a cluster unless it opts into
+// Parallel. Under OrderedReady a departing node reports unready, and the
+// StatefulSet will not create a pod above an unready one: on n3 a pod deleted
+// during a scale-down was never recreated, and a full restart of 8 pods took
+// over an hour, one pod at a time. Opt-in, because an existing cluster's
+// policy cannot change in place (the controller recreates its StatefulSet).
+func podManagementPolicy(cluster *v1alpha1.HyperbytedbCluster, clusterEnabled bool) appsv1.PodManagementPolicyType {
+	if clusterEnabled && cluster.Annotations[ParallelPodsAnnotation] != "true" {
 		return appsv1.OrderedReadyPodManagement
 	}
 	return appsv1.ParallelPodManagement

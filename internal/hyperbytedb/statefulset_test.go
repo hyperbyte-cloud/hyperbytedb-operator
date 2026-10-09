@@ -3,6 +3,7 @@ package hyperbytedb
 import (
 	"testing"
 
+	appsv1 "k8s.io/api/apps/v1"
 	"k8s.io/utils/ptr"
 
 	v1alpha1 "github.com/hyperbyte-cloud/hyperbytedb-operator/api/v1alpha1"
@@ -58,5 +59,25 @@ func TestLoggingLevelDefaultsToInfoInPodEnv(t *testing.T) {
 	}
 	if got != "info" {
 		t.Fatalf("HYPERBYTEDB__LOGGING__LEVEL = %q, want %q", got, "info")
+	}
+}
+
+// A cluster keeps OrderedReady unless it opts in; a single node is Parallel.
+func TestPodManagementIsParallelOnlyWhenAClusterOptsIn(t *testing.T) {
+	cluster := &v1alpha1.HyperbytedbCluster{
+		Spec: v1alpha1.HyperbytedbClusterSpec{Replicas: ptr.To(int32(3))},
+	}
+	if got := BuildStatefulSet(cluster, "h").Spec.PodManagementPolicy; got != appsv1.OrderedReadyPodManagement {
+		t.Errorf("cluster without the annotation: %s, want OrderedReady", got)
+	}
+	cluster.Annotations = map[string]string{ParallelPodsAnnotation: "true"}
+	if got := BuildStatefulSet(cluster, "h").Spec.PodManagementPolicy; got != appsv1.ParallelPodManagement {
+		t.Errorf("cluster with the annotation: %s, want Parallel", got)
+	}
+	single := &v1alpha1.HyperbytedbCluster{
+		Spec: v1alpha1.HyperbytedbClusterSpec{Replicas: ptr.To(int32(1))},
+	}
+	if got := BuildStatefulSet(single, "h").Spec.PodManagementPolicy; got != appsv1.ParallelPodManagement {
+		t.Errorf("single node: %s, want Parallel", got)
 	}
 }

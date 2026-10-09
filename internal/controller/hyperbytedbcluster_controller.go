@@ -186,6 +186,9 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 		}
 		return r.setFailedStatus(ctx, cluster, "StatefulSetFailed", err)
 	}
+	if stsResult.Recreating {
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
 
 	// 6a. Finish a scale-down the StatefulSet controller cannot.
 	if err := r.deleteStuckDepartedPods(ctx, cluster, stsResult); err != nil {
@@ -388,6 +391,9 @@ type stsReconcileResult struct {
 	// StatusReplicas is how many pods the StatefulSet currently has. It
 	// stays above SpecReplicas while a scale-down is still deleting pods.
 	StatusReplicas int32
+	// Recreating is set while the StatefulSet is being deleted to change a
+	// field that cannot be updated in place; the reconcile waits for it.
+	Recreating bool
 }
 
 func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, configHash string) (stsReconcileResult, error) {
@@ -407,6 +413,19 @@ func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context,
 	}
 	if err != nil {
 		return stsReconcileResult{}, err
+	}
+
+	// podManagementPolicy cannot be updated in place. Delete the StatefulSet
+	// leaving its pods running (orphaned); the next reconcile recreates it,
+	// and the new StatefulSet adopts the pods by their labels.
+	if existing.Spec.PodManagementPolicy != desired.Spec.PodManagementPolicy {
+		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, "RecreatingStatefulSet",
+			"Recreating StatefulSet to change pod management from %s to %s; pods keep running",
+			existing.Spec.PodManagementPolicy, desired.Spec.PodManagementPolicy)
+		if err := r.Delete(ctx, existing, client.PropagationPolicy(metav1.DeletePropagationOrphan)); err != nil && !apierrors.IsNotFound(err) {
+			return stsReconcileResult{}, err
+		}
+		return stsReconcileResult{Recreating: true}, nil
 	}
 
 	// Update mutable fields
