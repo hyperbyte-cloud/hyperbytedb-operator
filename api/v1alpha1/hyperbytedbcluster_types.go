@@ -230,7 +230,8 @@ type ChDBSpec struct {
 	SessionDataPath string `json:"sessionDataPath,omitempty"`
 
 	// Sets both query and write pool sizes when QueryPoolSize and WritePoolSize
-	// are unset. Defaults to 1 when all pool fields are unset.
+	// are unset. When all pool fields are unset the query pool is 12 and the
+	// write pool 1.
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	PoolSize int32 `json:"poolSize,omitempty"`

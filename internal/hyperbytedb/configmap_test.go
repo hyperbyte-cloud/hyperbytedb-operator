@@ -256,3 +256,38 @@ func TestShardingUpgradeGatesOmittedWhenUnset(t *testing.T) {
 		}
 	}
 }
+
+// Unset pools get a 12-connection query pool (one chDB query runs per region
+// a sharded query touches) and keep the 1-connection write pool. Any pool
+// field the spec sets is written exactly as before.
+func TestRenderConfigTOML_chdbPools(t *testing.T) {
+	cases := []struct {
+		name   string
+		chdb   v1alpha1.ChDBSpec
+		want   []string
+		absent []string
+	}{
+		{"unset", v1alpha1.ChDBSpec{},
+			[]string{"query_pool_size = 12", "write_pool_size = 1"}, []string{"\npool_size = 1"}},
+		{"legacy poolSize", v1alpha1.ChDBSpec{PoolSize: 6},
+			[]string{"\npool_size = 6"}, []string{"query_pool_size", "write_pool_size"}},
+		{"queryPoolSize only", v1alpha1.ChDBSpec{QueryPoolSize: 4},
+			[]string{"query_pool_size = 4"}, []string{"write_pool_size", "\npool_size"}},
+	}
+	for _, c := range cases {
+		cluster := &v1alpha1.HyperbytedbCluster{
+			Spec: v1alpha1.HyperbytedbClusterSpec{Replicas: ptr.To(int32(1)), ChDB: c.chdb},
+		}
+		out := renderConfigTOML(cluster)
+		for _, w := range c.want {
+			if !strings.Contains(out, w) {
+				t.Fatalf("%s: expected %q\n\ngot:\n%s", c.name, w, out)
+			}
+		}
+		for _, a := range c.absent {
+			if strings.Contains(out, a) {
+				t.Fatalf("%s: expected no %q\n\ngot:\n%s", c.name, a, out)
+			}
+		}
+	}
+}

@@ -2979,7 +2979,8 @@ spec:
                   poolSize:
                     description: |-
                       Sets both query and write pool sizes when QueryPoolSize and WritePoolSize
-                      are unset. Defaults to 1 when all pool fields are unset.
+                      are unset. When all pool fields are unset the query pool is 12 and the
+                      write pool 1.
                     format: int32
                     minimum: 1
                     type: integer

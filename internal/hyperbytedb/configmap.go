@@ -150,6 +150,12 @@ func writeFlushSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec
 	fmt.Fprintf(b, "arrow_wal_enabled = %t\n", arrowWALEnabled)
 }
 
+// chDB pool sizes when the spec sets no pool field.
+const (
+	defaultQueryPoolSize = 12
+	defaultWritePoolSize = 1
+)
+
 func writeChdbSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
 	b.WriteString("\n[chdb]\n")
 	sessionPath := defaultChdbSessionPath
@@ -164,11 +170,15 @@ func writeChdbSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec)
 		fmt.Fprintf(b, "write_pool_size = %d\n", spec.ChDB.WritePoolSize)
 	}
 	if spec.ChDB.QueryPoolSize <= 0 && spec.ChDB.WritePoolSize <= 0 {
-		poolSize := int32(1)
 		if spec.ChDB.PoolSize > 0 {
-			poolSize = spec.ChDB.PoolSize
+			fmt.Fprintf(b, "pool_size = %d\n", spec.ChDB.PoolSize)
+		} else {
+			// A sharded query runs one chDB query per region it touches; with
+			// one query connection a few concurrent multi-region queries
+			// queued (n3: 250-450 ms p50 at pool 1, 90-130 ms at pool 4).
+			fmt.Fprintf(b, "query_pool_size = %d\n", defaultQueryPoolSize)
+			fmt.Fprintf(b, "write_pool_size = %d\n", defaultWritePoolSize)
 		}
-		fmt.Fprintf(b, "pool_size = %d\n", poolSize)
 	}
 }
 
