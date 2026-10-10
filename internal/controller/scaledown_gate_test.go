@@ -93,3 +93,31 @@ func TestDepartingNodeAction(t *testing.T) {
 		})
 	}
 }
+
+// One at a time, only the first node still holding data is told; together,
+// every one is, so copies never land on a node that is about to leave.
+func TestDeparturePlanTellsOneAtATimeOrAllTogether(t *testing.T) {
+	active := departingNode{state: "active", reachable: true}
+	draining := departingNode{state: nodeStateDecommissioning, reachable: true}
+	gone := departingNode{state: nodeStateLeaving, reachable: true}
+	cases := []struct {
+		name      string
+		nodes     []departingNode
+		together  bool
+		tell      []int
+		evacuated bool
+	}{
+		{"one at a time tells the first", []departingNode{active, active, active}, false, []int{0}, false},
+		{"one at a time skips evacuated nodes", []departingNode{gone, active, active}, false, []int{1}, false},
+		{"one at a time waits on a draining node", []departingNode{draining, active}, false, nil, false},
+		{"together tells every node still holding data", []departingNode{active, draining, active, gone}, true, []int{0, 2}, false},
+		{"together is done when all have left", []departingNode{gone, gone}, true, nil, true},
+	}
+	for _, tc := range cases {
+		tell, evacuated := departurePlan(tc.nodes, tc.together)
+		if fmt.Sprint(tell) != fmt.Sprint(tc.tell) || evacuated != tc.evacuated {
+			t.Errorf("%s: tell=%v evacuated=%v, want tell=%v evacuated=%v",
+				tc.name, tell, evacuated, tc.tell, tc.evacuated)
+		}
+	}
+}

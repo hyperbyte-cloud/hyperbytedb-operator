@@ -81,3 +81,14 @@ func TestPodManagementIsParallelOnlyWhenAClusterOptsIn(t *testing.T) {
 		t.Errorf("single node: %s, want Parallel", got)
 	}
 }
+
+func TestEvacuateTogetherIsOptIn(t *testing.T) {
+	cluster := &v1alpha1.HyperbytedbCluster{}
+	if EvacuateTogether(cluster) {
+		t.Error("on without the annotation")
+	}
+	cluster.Annotations = map[string]string{EvacuateTogetherAnnotation: "true"}
+	if !EvacuateTogether(cluster) {
+		t.Error("off with the annotation")
+	}
+}

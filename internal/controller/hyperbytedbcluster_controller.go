@@ -837,40 +837,41 @@ func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Cont
 	headlessSvc := hyperbytedb.HeadlessServiceName(cluster)
 
 	// Highest ordinal first, matching the order the StatefulSet will remove
-	// them, and one at a time: decommissioning every departing node at once
-	// would pull them all out of the placement pool together while the
-	// StatefulSet is still terminating only the first.
-	evacuated := true
+	// them. One at a time unless the cluster opts into evacuating together
+	// (see departurePlan).
+	together := hyperbytedb.EvacuateTogether(cluster)
+	var departing []departingNode
+	var departHosts []string
 	for i := prevReplicas - 1; i >= desiredReplicas; i-- {
 		host := fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local",
 			stsName, i, headlessSvc, cluster.Namespace)
-
 		health, err := r.Members.Client.GetNodeHealth(ctx, host, port)
 		state := ""
 		if health != nil {
 			state = health.State
 		}
-		tell, gate := departingNodeAction(state, err == nil)
 		if err != nil {
 			log.V(1).Info("Departing pod unreachable; not gating on it",
 				"ordinal", i, "host", host, "error", err)
 		}
-
-		if tell {
-			if err := r.Members.Client.DecommissionNode(ctx, host, port); err != nil {
-				log.V(1).Info("Could not decommission departing pod",
-					"ordinal", i, "host", host, "error", err)
-			}
-		}
-
-		if gate {
-			log.Info("Waiting for departing node to finish evacuating",
-				"ordinal", i, "host", host, "state", state)
-			evacuated = false
-			// One at a time: do not start the next node's evacuation until
-			// this one has released its regions.
+		departing = append(departing, departingNode{state: state, reachable: err == nil})
+		departHosts = append(departHosts, host)
+		if !together && err == nil && state != nodeStateLeaving {
+			// Sequential: nodes after the first one still holding data are
+			// not looked at until it has released its regions.
 			break
 		}
+	}
+	tell, evacuated := departurePlan(departing, together)
+	for _, i := range tell {
+		if err := r.Members.Client.DecommissionNode(ctx, departHosts[i], port); err != nil {
+			log.V(1).Info("Could not decommission departing pod",
+				"host", departHosts[i], "error", err)
+		}
+	}
+	if !evacuated {
+		log.Info("Waiting for departing nodes to finish evacuating",
+			"departing", len(departHosts), "together", together)
 	}
 
 	if !evacuated {
@@ -1016,6 +1017,38 @@ const (
 // never gates: it may already be gone, and the cluster's own dead-peer path
 // restores replication factor, so blocking forever on a pod that will never
 // answer would wedge every future scale-down.
+type departingNode struct {
+	state     string
+	reachable bool
+}
+
+// departurePlan says which departing nodes (highest ordinal first) to tell to
+// decommission now, and whether every one has evacuated.
+//
+// One at a time by default: a node is told only once every node before it
+// has released its regions. Together, all are told at once. One at a time,
+// every node evacuated still counts as a placement target, so its regions
+// land on the next nodes to leave and move again: on n3 an 8 -> 3 scale-down
+// moved node 8's copies onto nodes 4-7, and node 6 then held 61 copies to
+// move. Together, the scheduler places every copy on a staying node once.
+// spec.replicas shrinks only after all have evacuated either way.
+func departurePlan(nodes []departingNode, together bool) (tell []int, evacuated bool) {
+	evacuated = true
+	for i, n := range nodes {
+		decommission, gate := departingNodeAction(n.state, n.reachable)
+		if decommission {
+			tell = append(tell, i)
+		}
+		if gate {
+			evacuated = false
+			if !together {
+				break
+			}
+		}
+	}
+	return tell, evacuated
+}
+
 func departingNodeAction(state string, reachable bool) (decommission bool, gate bool) {
 	if !reachable {
 		return false, false

@@ -369,6 +369,16 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 	return sts
 }
 
+// EvacuateTogetherAnnotation opts a cluster into decommissioning every
+// departing node of a scale-down at once instead of one at a time.
+const EvacuateTogetherAnnotation = "hyperbytedb.hyperbyte.cloud/evacuate-together"
+
+// EvacuateTogether reports whether a scale-down evacuates all departing nodes
+// at once. Opt-in: an older database may not expect several at a time.
+func EvacuateTogether(cluster *v1alpha1.HyperbytedbCluster) bool {
+	return cluster.Annotations[EvacuateTogetherAnnotation] == "true"
+}
+
 // ParallelPodsAnnotation opts a cluster into Parallel pod management.
 const ParallelPodsAnnotation = "hyperbytedb.hyperbyte.cloud/parallel-pods"
 
