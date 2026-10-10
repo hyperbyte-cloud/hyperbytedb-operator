@@ -376,7 +376,8 @@ const EvacuateTogetherAnnotation = "hyperbytedb.hyperbyte.cloud/evacuate-togethe
 // EvacuateTogether reports whether a scale-down evacuates all departing nodes
 // at once. Opt-in: an older database may not expect several at a time.
 func EvacuateTogether(cluster *v1alpha1.HyperbytedbCluster) bool {
-	return cluster.Annotations[EvacuateTogetherAnnotation] == "true"
+	return cluster.Annotations[EvacuateTogetherAnnotation] == "true" &&
+		Supports(cluster, CapabilityEvacuateTogether)
 }
 
 // ParallelPodsAnnotation opts a cluster into Parallel pod management.

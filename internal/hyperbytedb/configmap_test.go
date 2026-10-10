@@ -257,9 +257,9 @@ func TestShardingUpgradeGatesOmittedWhenUnset(t *testing.T) {
 	}
 }
 
-// Unset pools get a 12-connection query pool (one chDB query runs per region
-// a sharded query touches) and keep the 1-connection write pool. Any pool
-// field the spec sets is written exactly as before.
+// For a database that sizes its own query pool, unset pools leave it unset
+// and keep the 1-connection write pool. Any pool field the spec sets is
+// written exactly as before.
 func TestRenderConfigTOML_chdbPools(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -268,7 +268,7 @@ func TestRenderConfigTOML_chdbPools(t *testing.T) {
 		absent []string
 	}{
 		{"unset", v1alpha1.ChDBSpec{},
-			[]string{"query_pool_size = 12", "write_pool_size = 1"}, []string{"\npool_size = 1"}},
+			[]string{"write_pool_size = 1"}, []string{"query_pool_size", "\npool_size"}},
 		{"legacy poolSize", v1alpha1.ChDBSpec{PoolSize: 6},
 			[]string{"\npool_size = 6"}, []string{"query_pool_size", "write_pool_size"}},
 		{"queryPoolSize only", v1alpha1.ChDBSpec{QueryPoolSize: 4},

@@ -73,7 +73,7 @@ func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, cl
 	writeServerSection(&b, spec)
 	writeStorageSection(&b, spec)
 	writeFlushSection(&b, spec)
-	writeChdbSection(&b, spec)
+	writeChdbSection(&b, cluster)
 	writeAuthSection(&b, spec)
 	writeCardinalitySection(&b, spec)
 	writeLoggingSection(&b, spec)
@@ -82,7 +82,7 @@ func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, cl
 	writeRateLimitSection(&b, spec)
 	writeRetentionSection(&b, spec)
 	writeClusterSection(&b, cluster, clusterEnabled)
-	writeShardingSection(&b, spec)
+	writeShardingSection(&b, cluster)
 
 	return b.String()
 }
@@ -150,19 +150,26 @@ func writeFlushSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec
 	fmt.Fprintf(b, "arrow_wal_enabled = %t\n", arrowWALEnabled)
 }
 
-// chDB pool sizes when the spec sets no pool field.
-const (
-	defaultQueryPoolSize = 12
-	defaultWritePoolSize = 1
-)
-
-func writeChdbSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
+func writeChdbSection(b *strings.Builder, cluster *v1alpha1.HyperbytedbCluster) {
+	spec := &cluster.Spec
 	b.WriteString("\n[chdb]\n")
 	sessionPath := defaultChdbSessionPath
 	if spec.ChDB.SessionDataPath != "" {
 		sessionPath = spec.ChDB.SessionDataPath
 	}
 	fmt.Fprintf(b, "session_data_path = \"%s\"\n", sessionPath)
+	if !Supports(cluster, CapabilitySplitChdbPools) {
+		// One pool for both; query_pool_size would be ignored.
+		pool := spec.ChDB.PoolSize
+		if pool <= 0 {
+			pool = spec.ChDB.QueryPoolSize
+		}
+		if pool <= 0 {
+			pool = 1
+		}
+		fmt.Fprintf(b, "pool_size = %d\n", pool)
+		return
+	}
 	if spec.ChDB.QueryPoolSize > 0 {
 		fmt.Fprintf(b, "query_pool_size = %d\n", spec.ChDB.QueryPoolSize)
 	}
@@ -170,14 +177,16 @@ func writeChdbSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec)
 		fmt.Fprintf(b, "write_pool_size = %d\n", spec.ChDB.WritePoolSize)
 	}
 	if spec.ChDB.QueryPoolSize <= 0 && spec.ChDB.WritePoolSize <= 0 {
-		if spec.ChDB.PoolSize > 0 {
+		switch {
+		case spec.ChDB.PoolSize > 0:
 			fmt.Fprintf(b, "pool_size = %d\n", spec.ChDB.PoolSize)
-		} else {
-			// A sharded query runs one chDB query per region it touches; with
-			// one query connection a few concurrent multi-region queries
-			// queued (n3: 250-450 ms p50 at pool 1, 90-130 ms at pool 4).
-			fmt.Fprintf(b, "query_pool_size = %d\n", defaultQueryPoolSize)
-			fmt.Fprintf(b, "write_pool_size = %d\n", defaultWritePoolSize)
+		case Supports(cluster, CapabilityAutoQueryPool):
+			// The database sizes the query pool from its CPU limit (and
+			// `SET query_pool_size` changes it); a fixed number here would
+			// override that. The write pool keeps operator v0.1.x's 1.
+			b.WriteString("write_pool_size = 1\n")
+		default:
+			b.WriteString("pool_size = 1\n")
 		}
 	}
 }
@@ -376,8 +385,9 @@ func writeMinAcks(b *strings.Builder, v *intstr.IntOrString) {
 	}
 }
 
-func writeShardingSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
-	if spec.Sharding == nil {
+func writeShardingSection(b *strings.Builder, cluster *v1alpha1.HyperbytedbCluster) {
+	spec := &cluster.Spec
+	if spec.Sharding == nil || !Supports(cluster, CapabilitySharding) {
 		return
 	}
 	s := spec.Sharding

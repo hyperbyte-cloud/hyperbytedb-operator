@@ -142,6 +142,13 @@ The operator manages three CRDs:
 
 See `config/samples/` for example manifests.
 
+## HyperbyteDB versions
+
+The operator works out which HyperbyteDB version each cluster runs (from
+`spec.version`, the image tag, or the `hyperbytedb.hyperbyte.cloud/database-version`
+annotation) and renders only what that version supports. See
+[docs/compatibility.md](docs/compatibility.md) for the matrix.
+
 ## Development
 
 ```sh

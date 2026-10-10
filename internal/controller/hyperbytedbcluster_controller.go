@@ -256,6 +256,20 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 	memberStatuses := r.Members.CollectMemberStatuses(ctx, cluster, cluster.Namespace, replicas)
 	cluster.Status.Members = memberStatuses
 	cluster.Status.ClusterState = hyperbytedb.DeriveClusterState(memberStatuses)
+	// Which HyperbyteDB version the config and pods are rendered for, and
+	// what is left out for it (see hyperbytedb.CompatibilityMatrix).
+	versionReason, versionMessage := hyperbytedb.CompatibilitySummary(cluster)
+	versionStatus := metav1.ConditionTrue
+	if versionReason == "OlderThanSupported" {
+		versionStatus = metav1.ConditionFalse
+	}
+	meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
+		Type:               "DatabaseVersion",
+		Status:             versionStatus,
+		Reason:             versionReason,
+		Message:            versionMessage,
+		ObservedGeneration: cluster.Generation,
+	})
 
 	// 13. Cluster membership reconciliation (multi-node only).
 	// Asks the Raft leader (via API) to add any pod that is reachable but
