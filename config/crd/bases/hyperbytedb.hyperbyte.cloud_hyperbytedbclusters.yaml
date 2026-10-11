@@ -3024,7 +3024,11 @@ spec:
                     format: int32
                     type: integer
                   raftHeartbeatIntervalMs:
-                    default: 1000
+                    default: 300
+                    description: |-
+                      Must be below raftElectionTimeoutMs: Raft refuses to start otherwise.
+                      The default was 1000, equal to the election timeout's, and a cluster
+                      that kept both defaults crash-looped.
                     format: int32
                     type: integer
                   raftSnapshotThreshold:
@@ -3132,6 +3136,10 @@ spec:
                     - enabled
                     type: object
                 type: object
+                x-kubernetes-validations:
+                - message: raftHeartbeatIntervalMs must be below raftElectionTimeoutMs
+                  rule: '!has(self.raftHeartbeatIntervalMs) || !has(self.raftElectionTimeoutMs)
+                    || self.raftHeartbeatIntervalMs < self.raftElectionTimeoutMs'
               failover:
                 description: FailoverSpec controls automatic failure detection and
                   recovery.

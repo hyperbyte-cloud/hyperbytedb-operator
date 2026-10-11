@@ -266,6 +266,7 @@ type LoggingSpec struct {
 	Format string `json:"format,omitempty"`
 }
 
+// +kubebuilder:validation:XValidation:rule="!has(self.raftHeartbeatIntervalMs) || !has(self.raftElectionTimeoutMs) || self.raftHeartbeatIntervalMs < self.raftElectionTimeoutMs",message="raftHeartbeatIntervalMs must be below raftElectionTimeoutMs"
 type ClusterTuningSpec struct {
 	// +kubebuilder:default=2
 	HeartbeatIntervalSecs int32 `json:"heartbeatIntervalSecs,omitempty"`
@@ -276,7 +277,10 @@ type ClusterTuningSpec struct {
 	// +kubebuilder:default=5
 	ReplicationMaxRetries int32 `json:"replicationMaxRetries,omitempty"`
 
-	// +kubebuilder:default=1000
+	// Must be below raftElectionTimeoutMs: Raft refuses to start otherwise.
+	// The default was 1000, equal to the election timeout's, and a cluster
+	// that kept both defaults crash-looped.
+	// +kubebuilder:default=300
 	RaftHeartbeatIntervalMs int32 `json:"raftHeartbeatIntervalMs,omitempty"`
 
 	// +kubebuilder:default=1000
