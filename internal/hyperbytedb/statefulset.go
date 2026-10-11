@@ -155,6 +155,10 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		{Name: "HYPERBYTEDB__CHDB__SESSION_DATA_PATH", Value: chdbPath},
 		{Name: "HYPERBYTEDB__LOGGING__LEVEL", Value: logLevel},
 	}
+	clusterAuth := ClusterAuthEnabled(cluster)
+	if clusterAuth {
+		env = append(env, authEnv(cluster)...)
+	}
 	// Cluster mode and paths come from mounted config.toml (hot-updated on scale);
 	// avoid replica-dependent env vars so the pod template stays stable across scale events.
 
@@ -260,7 +264,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		mainContainer.Lifecycle = &corev1.Lifecycle{
 			PreStop: &corev1.LifecycleHandler{
 				Exec: &corev1.ExecAction{
-					Command: []string{"sh", "-c", clusterPreStopScript(port)},
+					Command: []string{"sh", "-c", clusterPreStopScript(port, clusterAuth)},
 				},
 			},
 		}
@@ -400,15 +404,22 @@ func podManagementPolicy(cluster *v1alpha1.HyperbytedbCluster, clusterEnabled bo
 // reports state=leaving (flush + replication acks + peer leave complete) or
 // until drainAckWaitSecs elapses. A fixed sleep is insufficient because
 // DrainService may wait up to 60s for peer replication acks alone.
-func clusterPreStopScript(port int32) string {
-	return fmt.Sprintf(`curl -sf -X POST http://localhost:%[1]d/internal/drain || true
+//
+// With cluster auth the curls send the cluster token from the pod's env;
+// without it the script is unchanged, so existing pods are not restarted.
+func clusterPreStopScript(port int32, clusterAuth bool) string {
+	auth := ""
+	if clusterAuth {
+		auth = ` -H "` + ClusterTokenHeader + `: $HYPERBYTEDB__AUTH__CLUSTER_TOKEN"`
+	}
+	return fmt.Sprintf(`curl -sf%[3]s -X POST http://localhost:%[1]d/internal/drain || true
 for i in $(seq 1 %[2]d); do
-  if curl -sf http://localhost:%[1]d/cluster/metrics 2>/dev/null | grep -q '"state":"leaving"'; then
+  if curl -sf%[3]s http://localhost:%[1]d/cluster/metrics 2>/dev/null | grep -q '"state":"leaving"'; then
     exit 0
   fi
   sleep 1
 done
-exit 0`, port, drainAckWaitSecs)
+exit 0`, port, drainAckWaitSecs, auth)
 }
 
 // containerPorts lists the main port and, when enabled, the control

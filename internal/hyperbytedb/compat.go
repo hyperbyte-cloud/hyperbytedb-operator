@@ -45,6 +45,9 @@ const (
 	CapabilityControlListener Capability = "control-listener"
 	// Evacuating several departing nodes at once.
 	CapabilityEvacuateTogether Capability = "evacuate-together"
+	// auth.cluster_token and auth.admin_username / admin_password: a
+	// cluster with auth on can reach its own internal routes.
+	CapabilityClusterAuth Capability = "cluster-auth"
 )
 
 // CompatibilityEntry is one row of the compatibility matrix.
@@ -64,6 +67,7 @@ var CompatibilityMatrix = []CompatibilityEntry{
 	{CapabilitySharding, "0.9.0-beta", "omits the [sharding] section; spec.sharding has no effect"},
 	{CapabilityControlListener, "0.9.0-beta", "ignores the control-listener annotation (no control port, liveness on the server port)"},
 	{CapabilityEvacuateTogether, "0.9.0-beta", "ignores the evacuate-together annotation (departing nodes leave one at a time)"},
+	{CapabilityClusterAuth, "0.9.0-beta", "renders auth.enabled only; no auth Secret, so a cluster with auth on cannot reach its internal routes"},
 }
 
 // DatabaseVersion is the HyperbyteDB version a cluster is rendered for.

@@ -44,6 +44,7 @@ What v0.2.0 renders per version:
 | Sharding (`[sharding]`, `spec.sharding`) | 0.9.0-beta | omits the section; `spec.sharding` has no effect |
 | Control listener (`control-listener` annotation) | 0.9.0-beta | ignores the annotation; liveness stays on the server port |
 | Evacuate together (`evacuate-together` annotation) | 0.9.0-beta | ignores the annotation; departing nodes leave one at a time |
+| Cluster auth (`spec.auth.enabled`: auth Secret, cluster token, bootstrap admin) | 0.9.0-beta | renders `auth.enabled` only; no Secret, so a cluster with auth on cannot reach its own internal routes |
 | Parallel pod management (`parallel-pods` annotation) | any | — (operator only) |
 
 The source of truth is `CompatibilityMatrix` in

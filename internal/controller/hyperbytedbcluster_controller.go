@@ -147,6 +147,16 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return r.setFailedStatus(ctx, cluster, "TLSFailed", err)
 	}
 
+	// 1b. Auth Secret. Every call the operator makes to the cluster from here
+	// on sends its cluster token.
+	if hyperbytedb.ClusterAuthEnabled(cluster) {
+		token, err := r.reconcileAuthSecret(ctx, cluster)
+		if err != nil {
+			return r.setFailedStatus(ctx, cluster, "AuthSecretFailed", err)
+		}
+		ctx = hyperbytedb.WithClusterToken(ctx, token)
+	}
+
 	// 2. ConfigMap
 	if err := r.reconcileConfigMap(ctx, cluster); err != nil {
 		return r.setFailedStatus(ctx, cluster, "ConfigMapFailed", err)
@@ -331,6 +341,48 @@ func (r *HyperbytedbClusterReconciler) reconcileTLS(ctx context.Context, cluster
 
 	r.Recorder.Event(cluster, corev1.EventTypeNormal, "TLSCreated", "Generated self-signed TLS certificate")
 	return r.Create(ctx, secret)
+}
+
+// reconcileAuthSecret makes sure the auth Secret exists with every key,
+// generating what is missing, and returns the cluster token. A Secret the
+// operator names (<cluster>-auth) is owned by the cluster and goes with it;
+// one named in spec.auth.credentialsSecretName is the user's and is kept.
+func (r *HyperbytedbClusterReconciler) reconcileAuthSecret(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster) (string, error) {
+	name := hyperbytedb.AuthSecretName(cluster)
+	secret := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: cluster.Namespace}, secret)
+	switch {
+	case apierrors.IsNotFound(err):
+		secret, err = hyperbytedb.BuildAuthSecret(cluster)
+		if err != nil {
+			return "", fmt.Errorf("generating auth secret: %w", err)
+		}
+		if cluster.Spec.Auth.CredentialsSecretName == "" {
+			if err := controllerutil.SetControllerReference(cluster, secret, r.Scheme); err != nil {
+				return "", err
+			}
+		}
+		if err := r.Create(ctx, secret); err != nil {
+			return "", err
+		}
+		r.Recorder.Event(cluster, corev1.EventTypeNormal, "AuthSecretCreated",
+			fmt.Sprintf("Generated cluster token and admin login in Secret %s", name))
+	case err != nil:
+		return "", err
+	default:
+		changed, err := hyperbytedb.FillAuthSecret(secret)
+		if err != nil {
+			return "", err
+		}
+		if changed {
+			if err := r.Update(ctx, secret); err != nil {
+				return "", err
+			}
+			r.Recorder.Event(cluster, corev1.EventTypeNormal, "AuthSecretUpdated",
+				fmt.Sprintf("Added missing keys to Secret %s", name))
+		}
+	}
+	return string(secret.Data[hyperbytedb.AuthSecretClusterTokenKey]), nil
 }
 
 // ---------- ConfigMap ----------
