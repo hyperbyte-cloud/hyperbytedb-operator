@@ -207,3 +207,87 @@ func TestRenderConfigTOML_sharding(t *testing.T) {
 		t.Fatal("ConfigHash must change when sharding.enabled changes")
 	}
 }
+
+func TestShardingUpgradeGatesReachTheConfig(t *testing.T) {
+	// The rollout procedure for a sharded cluster is "turn these off, upgrade
+	// every node, turn them back on". Until they were exposed on the CRD there
+	// was no way to do that through the operator: the generated config never
+	// carried them and the server fell back to on, while reconcileConfigMap
+	// overwrote any hand edit. The mitigation existed in the binary and not in
+	// the product.
+	cluster := &v1alpha1.HyperbytedbCluster{
+		Spec: v1alpha1.HyperbytedbClusterSpec{
+			Replicas: ptr.To(int32(3)),
+			Sharding: &v1alpha1.ShardingSpec{
+				Enabled:                    true,
+				AddPeerProposalsEnabled:    ptr.To(false),
+				RemovePeerProposalsEnabled: ptr.To(false),
+			},
+		},
+	}
+	out := renderConfigTOML(cluster)
+	for _, want := range []string{
+		"add_peer_proposals_enabled = false",
+		"remove_peer_proposals_enabled = false",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected config to contain %q\n\ngot:\n%s", want, out)
+		}
+	}
+}
+
+func TestShardingUpgradeGatesOmittedWhenUnset(t *testing.T) {
+	// Unset must stay absent rather than being written as an explicit true.
+	// Emitting a value here would pin the setting from the operator side and
+	// silently take ownership of a server default.
+	cluster := &v1alpha1.HyperbytedbCluster{
+		Spec: v1alpha1.HyperbytedbClusterSpec{
+			Replicas: ptr.To(int32(3)),
+			Sharding: &v1alpha1.ShardingSpec{Enabled: true},
+		},
+	}
+	out := renderConfigTOML(cluster)
+	for _, absent := range []string{
+		"add_peer_proposals_enabled",
+		"remove_peer_proposals_enabled",
+	} {
+		if strings.Contains(out, absent) {
+			t.Fatalf("expected config NOT to contain %q\n\ngot:\n%s", absent, out)
+		}
+	}
+}
+
+// For a database that sizes its own query pool, unset pools leave it unset
+// and keep the 1-connection write pool. Any pool field the spec sets is
+// written exactly as before.
+func TestRenderConfigTOML_chdbPools(t *testing.T) {
+	cases := []struct {
+		name   string
+		chdb   v1alpha1.ChDBSpec
+		want   []string
+		absent []string
+	}{
+		{"unset", v1alpha1.ChDBSpec{},
+			[]string{"write_pool_size = 1"}, []string{"query_pool_size", "\npool_size"}},
+		{"legacy poolSize", v1alpha1.ChDBSpec{PoolSize: 6},
+			[]string{"\npool_size = 6"}, []string{"query_pool_size", "write_pool_size"}},
+		{"queryPoolSize only", v1alpha1.ChDBSpec{QueryPoolSize: 4},
+			[]string{"query_pool_size = 4"}, []string{"write_pool_size", "\npool_size"}},
+	}
+	for _, c := range cases {
+		cluster := &v1alpha1.HyperbytedbCluster{
+			Spec: v1alpha1.HyperbytedbClusterSpec{Replicas: ptr.To(int32(1)), ChDB: c.chdb},
+		}
+		out := renderConfigTOML(cluster)
+		for _, w := range c.want {
+			if !strings.Contains(out, w) {
+				t.Fatalf("%s: expected %q\n\ngot:\n%s", c.name, w, out)
+			}
+		}
+		for _, a := range c.absent {
+			if strings.Contains(out, a) {
+				t.Fatalf("%s: expected no %q\n\ngot:\n%s", c.name, a, out)
+			}
+		}
+	}
+}

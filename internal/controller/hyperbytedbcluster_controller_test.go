@@ -200,6 +200,147 @@ var _ = Describe("HyperbytedbCluster Controller", func() {
 		})
 	})
 
+	Context("When a cluster opts into parallel pod management", func() {
+		const resourceName = "test-parallel"
+
+		ctx := context.Background()
+
+		typeNamespacedName := types.NamespacedName{
+			Name:      resourceName,
+			Namespace: "default",
+		}
+
+		BeforeEach(func() {
+			resource := &hyperbytedbv1alpha1.HyperbytedbCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: hyperbytedbv1alpha1.HyperbytedbClusterSpec{
+					Replicas: ptr.To(int32(3)),
+					Image:    "hyperbytedb:latest",
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			resource := &hyperbytedbv1alpha1.HyperbytedbCluster{}
+			if err := k8sClient.Get(ctx, typeNamespacedName, resource); err == nil {
+				Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+			}
+		})
+
+		// The policy cannot change in place, so the StatefulSet is deleted
+		// with its pods orphaned (left running) and recreated. envtest runs
+		// no garbage collector, so the delete stays pending on the orphan
+		// finalizer: that pending state is what this checks.
+		It("recreates the StatefulSet leaving its pods running", func() {
+			controllerReconciler := &HyperbytedbClusterReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(32),
+				Members:  hyperbytedb.NewMemberManager(),
+			}
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			sts := &appsv1.StatefulSet{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, sts)).To(Succeed())
+			Expect(sts.Spec.PodManagementPolicy).To(Equal(appsv1.OrderedReadyPodManagement))
+
+			By("opting in")
+			cluster := &hyperbytedbv1alpha1.HyperbytedbCluster{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, cluster)).To(Succeed())
+			cluster.Annotations = map[string]string{hyperbytedb.ParallelPodsAnnotation: "true"}
+			Expect(k8sClient.Update(ctx, cluster)).To(Succeed())
+
+			result, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
+
+			Expect(k8sClient.Get(ctx, typeNamespacedName, sts)).To(Succeed())
+			Expect(sts.DeletionTimestamp).NotTo(BeNil())
+			Expect(sts.Finalizers).To(ContainElement(metav1.FinalizerOrphanDependents))
+		})
+	})
+
+	Context("When a scale-down leaves pods above .spec.replicas", func() {
+		const resourceName = "test-scaledown"
+
+		ctx := context.Background()
+
+		typeNamespacedName := types.NamespacedName{
+			Name:      resourceName,
+			Namespace: "default",
+		}
+
+		BeforeEach(func() {
+			resource := &hyperbytedbv1alpha1.HyperbytedbCluster{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: "default",
+				},
+				Spec: hyperbytedbv1alpha1.HyperbytedbClusterSpec{
+					Replicas: ptr.To(int32(3)),
+					Image:    "hyperbytedb:latest",
+				},
+			}
+			Expect(k8sClient.Create(ctx, resource)).To(Succeed())
+		})
+
+		It("deletes the unready ones", func() {
+			controllerReconciler := &HyperbytedbClusterReconciler{
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Recorder: record.NewFakeRecorder(32),
+				Members:  hyperbytedb.NewMemberManager(),
+			}
+			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("faking a StatefulSet that still has 5 pods after shrinking to 3")
+			sts := &appsv1.StatefulSet{}
+			Expect(k8sClient.Get(ctx, typeNamespacedName, sts)).To(Succeed())
+			sts.Status.Replicas = 5
+			Expect(k8sClient.Status().Update(ctx, sts)).To(Succeed())
+
+			makePod := func(name string, ready bool) {
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+					Spec: corev1.PodSpec{Containers: []corev1.Container{
+						{Name: "hyperbytedb", Image: "hyperbytedb:latest"},
+					}},
+				}
+				Expect(k8sClient.Create(ctx, pod)).To(Succeed())
+				status := corev1.ConditionFalse
+				if ready {
+					status = corev1.ConditionTrue
+				}
+				pod.Status.Conditions = []corev1.PodCondition{{Type: corev1.PodReady, Status: status}}
+				Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
+			}
+			makePod(resourceName+"-3", true)
+			makePod(resourceName+"-4", false)
+			DeferCleanup(func() {
+				for _, name := range []string{resourceName + "-3", resourceName + "-4"} {
+					_ = k8sClient.Delete(ctx, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"}})
+				}
+			})
+
+			_, err = controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+			Expect(err).NotTo(HaveOccurred())
+
+			By("the unready departed pod is gone; the ready one is left to the StatefulSet")
+			gone := &corev1.Pod{}
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: resourceName + "-4", Namespace: "default"}, gone)
+			Expect(errors.IsNotFound(err) || gone.DeletionTimestamp != nil).To(BeTrue())
+			kept := &corev1.Pod{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName + "-3", Namespace: "default"}, kept)).To(Succeed())
+			Expect(kept.DeletionTimestamp).To(BeNil())
+		})
+	})
+
 	Context("When the cluster is paused", func() {
 		const resourceName = "test-paused"
 
