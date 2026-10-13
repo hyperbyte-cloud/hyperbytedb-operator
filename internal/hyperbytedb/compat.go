@@ -22,7 +22,7 @@ const DatabaseVersionAnnotation = "hyperbytedb.hyperbyte.cloud/database-version"
 
 // LatestDatabaseVersion is the newest HyperbyteDB release this operator
 // knows. A cluster whose version cannot be determined is rendered for it.
-const LatestDatabaseVersion = "0.9.0-beta"
+const LatestDatabaseVersion = "0.9.1-beta"
 
 // OldestDatabaseVersion is the oldest HyperbyteDB release this operator
 // renders for. Older ones are rendered as this one.
@@ -67,7 +67,7 @@ var CompatibilityMatrix = []CompatibilityEntry{
 	{CapabilitySharding, "0.9.0-beta", "omits the [sharding] section; spec.sharding has no effect"},
 	{CapabilityControlListener, "0.9.0-beta", "ignores the control-listener annotation (no control port, liveness on the server port)"},
 	{CapabilityEvacuateTogether, "0.9.0-beta", "ignores the evacuate-together annotation (departing nodes leave one at a time)"},
-	{CapabilityClusterAuth, "0.9.0-beta", "renders auth.enabled only; no auth Secret, so a cluster with auth on cannot reach its internal routes"},
+	{CapabilityClusterAuth, "0.9.1-beta", "renders auth.enabled only; no auth Secret, so a cluster with auth on cannot reach its internal routes"},
 }
 
 // DatabaseVersion is the HyperbyteDB version a cluster is rendered for.

@@ -32,10 +32,11 @@ Reasons: `Supported`, `Assumed` (no version found), `NewerThanKnown`
 
 | Operator | Renders for HyperbyteDB | Newest known |
 |---|---|---|
+| v0.3.0 | 0.8.0 and later | 0.9.1-beta |
 | v0.2.0 | 0.8.0 and later | 0.9.0-beta |
 | v0.1.x | not version-aware: renders the newest keys for every cluster (0.8.x ignores the ones it does not know) | — |
 
-What v0.2.0 renders per version:
+What v0.3.0 renders per version:
 
 | Capability | HyperbyteDB | For older versions the operator |
 |---|---|---|
@@ -44,7 +45,7 @@ What v0.2.0 renders per version:
 | Sharding (`[sharding]`, `spec.sharding`) | 0.9.0-beta | omits the section; `spec.sharding` has no effect |
 | Control listener (`control-listener` annotation) | 0.9.0-beta | ignores the annotation; liveness stays on the server port |
 | Evacuate together (`evacuate-together` annotation) | 0.9.0-beta | ignores the annotation; departing nodes leave one at a time |
-| Cluster auth (`spec.auth.enabled`: auth Secret, cluster token, bootstrap admin) | 0.9.0-beta | renders `auth.enabled` only; no Secret, so a cluster with auth on cannot reach its own internal routes |
+| Cluster auth (`spec.auth.enabled`: auth Secret, cluster token, bootstrap admin) | 0.9.1-beta | renders `auth.enabled` only; no Secret, so a cluster with auth on cannot reach its own internal routes |
 | Parallel pod management (`parallel-pods` annotation) | any | — (operator only) |
 
 The source of truth is `CompatibilityMatrix` in
@@ -52,6 +53,10 @@ The source of truth is `CompatibilityMatrix` in
 
 ## Upgrading
 
+- v0.2.0 → v0.3.0: cluster auth needs HyperbyteDB 0.9.1-beta (0.9.0-beta
+  has no cluster token and refuses the key). A cluster with
+  `spec.auth.enabled` that resolves to 0.9.0-beta gets no auth Secret env,
+  so move it to 0.9.1-beta (version and image) before or with the operator.
 - Upgrading the operator does not restart a cluster unless its rendered
   config or pods change. v0.1.x → v0.2.0 renders the same config for a
   0.8.5-beta cluster and for a 0.9 development cluster that sets its pool

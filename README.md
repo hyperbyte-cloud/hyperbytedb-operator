@@ -76,7 +76,7 @@ configurable values.
 ```sh
 helm upgrade hyperbytedb-operator \
   oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator \
-  --version 0.2.0 \
+  --version 0.3.0 \
   --namespace hyperbytedb-operator-system \
   --reuse-values
 ```

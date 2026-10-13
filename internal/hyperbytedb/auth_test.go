@@ -51,14 +51,14 @@ func TestFillAuthSecretKeepsWhatIsThereAndAddsTheRest(t *testing.T) {
 	if again {
 		t.Error("a full Secret was changed")
 	}
-	other, _ := BuildAuthSecret(authCluster("0.9.0-beta", true))
+	other, _ := BuildAuthSecret(authCluster("0.9.1-beta", true))
 	if string(other.Data[AuthSecretClusterTokenKey]) == string(s.Data[AuthSecretClusterTokenKey]) {
 		t.Error("two generated tokens are equal")
 	}
 }
 
 func TestAuthSecretNameDefaultsToTheCluster(t *testing.T) {
-	c := authCluster("0.9.0-beta", true)
+	c := authCluster("0.9.1-beta", true)
 	if got := AuthSecretName(c); got != "uat-auth" {
 		t.Errorf("got %q", got)
 	}
@@ -72,7 +72,7 @@ func TestAuthSecretNameDefaultsToTheCluster(t *testing.T) {
 // the token. Off, or on a database without cluster auth, the pod template is
 // what it was, so existing clusters are not restarted.
 func TestClusterAuthReachesThePodOnlyWhenOnAndSupported(t *testing.T) {
-	on := hyperbytedbContainer(t, authCluster("0.9.0-beta", true))
+	on := hyperbytedbContainer(t, authCluster("0.9.1-beta", true))
 	refs := map[string]string{}
 	for _, e := range on.Env {
 		if e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil {
@@ -92,9 +92,11 @@ func TestClusterAuthReachesThePodOnlyWhenOnAndSupported(t *testing.T) {
 		t.Errorf("preStop curls must send the token:\n%s", preStop)
 	}
 
-	off := hyperbytedbContainer(t, authCluster("0.9.0-beta", false))
+	off := hyperbytedbContainer(t, authCluster("0.9.1-beta", false))
 	old := hyperbytedbContainer(t, authCluster("0.8.5-beta", true))
-	for name, c := range map[string]corev1.Container{"auth off": off, "0.8.5-beta": old} {
+	// 0.9.0-beta has no auth.cluster_token and refuses unknown config keys.
+	noToken := hyperbytedbContainer(t, authCluster("0.9.0-beta", true))
+	for name, c := range map[string]corev1.Container{"auth off": off, "0.8.5-beta": old, "0.9.0-beta": noToken} {
 		for _, e := range c.Env {
 			if strings.HasPrefix(e.Name, "HYPERBYTEDB__AUTH__") {
 				t.Errorf("%s: unexpected env %s", name, e.Name)

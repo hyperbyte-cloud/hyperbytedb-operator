@@ -51,7 +51,15 @@ func TestSupports_followsTheMatrix(t *testing.T) {
 			}
 		}
 	}
-	for _, version := range []string{"0.9.0-beta", "0.9.0-beta.2", "0.9.0", "1.2.0"} {
+	for _, version := range []string{"0.9.0-beta", "0.9.0-beta.2", "0.9.0"} {
+		c := versionedCluster(version, "", nil)
+		for _, e := range CompatibilityMatrix {
+			if got, want := Supports(c, e.Capability), e.Capability != CapabilityClusterAuth; got != want {
+				t.Errorf("%s supports %s = %v, want %v", version, e.Capability, got, want)
+			}
+		}
+	}
+	for _, version := range []string{"0.9.1-beta", "0.9.1-beta.2", "0.9.1", "1.2.0"} {
 		c := versionedCluster(version, "", nil)
 		for _, e := range CompatibilityMatrix {
 			if !Supports(c, e.Capability) {
