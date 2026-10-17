@@ -13,7 +13,7 @@ func mainContainerOf(t *testing.T, cluster *v1alpha1.HyperbytedbCluster) (livene
 	t.Helper()
 	sts := BuildStatefulSet(cluster, "hash")
 	for _, c := range sts.Spec.Template.Spec.Containers {
-		if c.Name != "hyperbytedb" {
+		if c.Name != containerName {
 			continue
 		}
 		for _, p := range c.Ports {
@@ -52,7 +52,7 @@ func TestSingleNodeKeepsLivenessOnTheMainPort(t *testing.T) {
 		Spec: v1alpha1.HyperbytedbClusterSpec{Replicas: ptr.To(int32(1))},
 	}
 	port, ports := mainContainerOf(t, cluster)
-	if port != "http" || strings.Join(ports, ",") != "http" {
+	if port != httpPortName || strings.Join(ports, ",") != httpPortName {
 		t.Errorf("single node: liveness %q ports %v, want http / [http]", port, ports)
 	}
 	if strings.Contains(renderConfigTOML(cluster), "control_port") {
@@ -68,7 +68,7 @@ func TestClusteredLivenessStaysOnTheMainPortWithoutOptIn(t *testing.T) {
 		Spec: v1alpha1.HyperbytedbClusterSpec{Replicas: ptr.To(int32(3))},
 	}
 	port, ports := mainContainerOf(t, cluster)
-	if port != "http" || strings.Join(ports, ",") != "http" {
+	if port != httpPortName || strings.Join(ports, ",") != httpPortName {
 		t.Errorf("no opt-in: liveness %q ports %v, want http / [http]", port, ports)
 	}
 	if strings.Contains(renderConfigTOML(cluster), "control_port") {

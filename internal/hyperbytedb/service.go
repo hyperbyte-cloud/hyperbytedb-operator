@@ -44,7 +44,7 @@ const ControlListenerAnnotation = "hyperbytedb.hyperbyte.cloud/control-listener"
 // clustered CR left an existing 0.8.5-beta cluster failing liveness on a
 // port nothing listened on, restarting in a loop.
 func ControlListenerEnabled(cluster *v1alpha1.HyperbytedbCluster, clusterEnabled bool) bool {
-	return clusterEnabled && cluster.Annotations[ControlListenerAnnotation] == "true" &&
+	return clusterEnabled && cluster.Annotations[ControlListenerAnnotation] == annotationTrue &&
 		Supports(cluster, CapabilityControlListener)
 }
 
@@ -62,9 +62,9 @@ func BuildHeadlessService(cluster *v1alpha1.HyperbytedbCluster) *corev1.Service 
 			PublishNotReadyAddresses: true,
 			Ports: []corev1.ServicePort{
 				{
-					Name:       "http",
+					Name:       httpPortName,
 					Port:       port,
-					TargetPort: intstr.FromString("http"),
+					TargetPort: intstr.FromString(httpPortName),
 					Protocol:   corev1.ProtocolTCP,
 				},
 			},
@@ -85,9 +85,9 @@ func BuildClientService(cluster *v1alpha1.HyperbytedbCluster) *corev1.Service {
 			Selector: CommonLabels(cluster),
 			Ports: []corev1.ServicePort{
 				{
-					Name:       "http",
+					Name:       httpPortName,
 					Port:       port,
-					TargetPort: intstr.FromString("http"),
+					TargetPort: intstr.FromString(httpPortName),
 					Protocol:   corev1.ProtocolTCP,
 				},
 			},

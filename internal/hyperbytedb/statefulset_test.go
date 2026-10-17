@@ -13,7 +13,7 @@ func podEnv(t *testing.T, cluster *v1alpha1.HyperbytedbCluster, name string) (st
 	t.Helper()
 	sts := BuildStatefulSet(cluster, "hash")
 	for _, c := range sts.Spec.Template.Spec.Containers {
-		if c.Name != "hyperbytedb" {
+		if c.Name != containerName {
 			continue
 		}
 		for _, e := range c.Env {

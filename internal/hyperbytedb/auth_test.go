@@ -24,7 +24,7 @@ func authCluster(version string, enabled bool) *v1alpha1.HyperbytedbCluster {
 func hyperbytedbContainer(t *testing.T, cluster *v1alpha1.HyperbytedbCluster) corev1.Container {
 	t.Helper()
 	for _, c := range BuildStatefulSet(cluster, "hash").Spec.Template.Spec.Containers {
-		if c.Name == "hyperbytedb" {
+		if c.Name == containerName {
 			return c
 		}
 	}
@@ -128,7 +128,7 @@ func TestTheClientSendsTheTokenOnlyWithOne(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 	if !reflect.DeepEqual(got, []string{"", "tok"}) {
 		t.Errorf("headers seen = %q", got)

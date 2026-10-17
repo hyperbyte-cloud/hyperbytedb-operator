@@ -25,7 +25,7 @@ func BuildServiceMonitor(cluster *v1alpha1.HyperbytedbCluster) *unstructured.Uns
 		},
 		"endpoints": []any{
 			map[string]any{
-				"port":     "http",
+				"port":     httpPortName,
 				"path":     "/metrics",
 				"interval": "15s",
 			},

@@ -31,12 +31,12 @@ func (f *fakeRaft) handler(id uint64) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/cluster/leader":
-			fmt.Fprintf(w, `{"leader_id":%d,"this_node_id":%d,"is_leader":%t,"term":1}`,
+			_, _ = fmt.Fprintf(w, `{"leader_id":%d,"this_node_id":%d,"is_leader":%t,"term":1}`,
 				f.leader, id, f.leader == id)
 		case "/cluster/membership/remove-node":
 			if f.leader != id {
 				w.WriteHeader(http.StatusServiceUnavailable)
-				fmt.Fprintf(w, `{"error":"not raft leader","leader_id":%d}`, f.leader)
+				_, _ = fmt.Fprintf(w, `{"error":"not raft leader","leader_id":%d}`, f.leader)
 				return
 			}
 			var req struct {
@@ -58,7 +58,7 @@ func (f *fakeRaft) handler(id uint64) http.HandlerFunc {
 					}
 				}
 			}
-			fmt.Fprintf(w, `{"node_id":%d,"removed_from_voters":%t,"leader_id":%d,"remaining_voters":[]}`,
+			_, _ = fmt.Fprintf(w, `{"node_id":%d,"removed_from_voters":%t,"leader_id":%d,"remaining_voters":[]}`,
 				req.NodeID, was, id)
 		default:
 			w.WriteHeader(http.StatusNotFound)

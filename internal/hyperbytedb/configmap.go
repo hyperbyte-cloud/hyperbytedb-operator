@@ -212,7 +212,7 @@ func writeCardinalitySection(b *strings.Builder, spec *v1alpha1.HyperbytedbClust
 
 func writeLoggingSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
 	b.WriteString("\n[logging]\n")
-	level := "info"
+	level := defaultLogLevel
 	if spec.Logging.Level != "" {
 		level = spec.Logging.Level
 	}

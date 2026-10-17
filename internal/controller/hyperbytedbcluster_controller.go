@@ -20,7 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
-	"sort"
+	"slices"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -1058,7 +1058,7 @@ func raftLeaderHost(ctx context.Context, c *hyperbytedb.Client, hosts map[uint64
 	for id := range hosts {
 		ids = append(ids, id)
 	}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	for _, id := range ids {
 		info, err := c.GetClusterLeader(ctx, hosts[id], port)
 		if err != nil || info.LeaderID == nil {

@@ -21,6 +21,14 @@ const (
 	// podTerminationGraceSecs is the kubelet grace budget (includes preStop). Keep
 	// comfortably above drainAckWaitSecs + headroom for flush + SIGTERM cleanup.
 	podTerminationGraceSecs = 120
+	// containerName is the database container's name in every pod.
+	containerName = "hyperbytedb"
+	// httpPortName names the database's HTTP port on pods and Services.
+	httpPortName = "http"
+	// defaultLogLevel is the log level without spec.logging.level.
+	defaultLogLevel = "info"
+	// annotationTrue is the value that turns an opt-in annotation on.
+	annotationTrue = "true"
 )
 
 func StatefulSetName(cluster *v1alpha1.HyperbytedbCluster) string {
@@ -145,7 +153,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 	// inert, and a sharded cluster could not be put into debug to diagnose a
 	// placement or staging failure at all. Set it as env, like the four other
 	// image defaults this block already restates, so the CR field wins.
-	logLevel := "info"
+	logLevel := defaultLogLevel
 	if cluster.Spec.Logging.Level != "" {
 		logLevel = cluster.Spec.Logging.Level
 	}
@@ -190,7 +198,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 	// served on the database's control runtime, so a node saturated with
 	// writes still answers. On the main port, /ping queued behind write work
 	// past the 3s timeout and kubelet killed busy but healthy nodes.
-	livenessPort := intstr.FromString("http")
+	livenessPort := intstr.FromString(httpPortName)
 	livenessScheme := probeScheme
 	controlListener := ControlListenerEnabled(cluster, clusterEnabled)
 	if controlListener {
@@ -214,7 +222,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		ProbeHandler: corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{
 				Path:   "/health",
-				Port:   intstr.FromString("http"),
+				Port:   intstr.FromString(httpPortName),
 				Scheme: probeScheme,
 			},
 		},
@@ -235,7 +243,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		ProbeHandler: corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{
 				Path:   "/ping",
-				Port:   intstr.FromString("http"),
+				Port:   intstr.FromString(httpPortName),
 				Scheme: probeScheme,
 			},
 		},
@@ -247,7 +255,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 
 	// --------------- main container ---------------
 	mainContainer := corev1.Container{
-		Name:            "hyperbytedb",
+		Name:            containerName,
 		Image:           image,
 		ImagePullPolicy: pullPolicy,
 		Command:         []string{"sh", "/entrypoint/start.sh"},
@@ -380,7 +388,7 @@ const EvacuateTogetherAnnotation = "hyperbytedb.hyperbyte.cloud/evacuate-togethe
 // EvacuateTogether reports whether a scale-down evacuates all departing nodes
 // at once. Opt-in: an older database may not expect several at a time.
 func EvacuateTogether(cluster *v1alpha1.HyperbytedbCluster) bool {
-	return cluster.Annotations[EvacuateTogetherAnnotation] == "true" &&
+	return cluster.Annotations[EvacuateTogetherAnnotation] == annotationTrue &&
 		Supports(cluster, CapabilityEvacuateTogether)
 }
 
@@ -394,7 +402,7 @@ const ParallelPodsAnnotation = "hyperbytedb.hyperbyte.cloud/parallel-pods"
 // over an hour, one pod at a time. Opt-in, because an existing cluster's
 // policy cannot change in place (the controller recreates its StatefulSet).
 func podManagementPolicy(cluster *v1alpha1.HyperbytedbCluster, clusterEnabled bool) appsv1.PodManagementPolicyType {
-	if clusterEnabled && cluster.Annotations[ParallelPodsAnnotation] != "true" {
+	if clusterEnabled && cluster.Annotations[ParallelPodsAnnotation] != annotationTrue {
 		return appsv1.OrderedReadyPodManagement
 	}
 	return appsv1.ParallelPodManagement

@@ -23,7 +23,7 @@ func healthServer(t *testing.T, state string, calls *int) (host string, port int
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprintf(w, `{"status":"warn","message":"node is %s","state":%q}`, state, state)
+		_, _ = fmt.Fprintf(w, `{"status":"warn","message":"node is %s","state":%q}`, state, state)
 	}))
 	t.Cleanup(srv.Close)
 
