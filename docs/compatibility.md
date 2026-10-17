@@ -32,12 +32,13 @@ Reasons: `Supported`, `Assumed` (no version found), `NewerThanKnown`
 
 | Operator | Renders for HyperbyteDB | Newest known |
 |---|---|---|
+| v0.3.2 | 0.8.0 and later | 0.9.1-beta |
 | v0.3.1 | 0.8.0 and later | 0.9.1-beta |
 | v0.3.0 | 0.8.0 and later | 0.9.1-beta |
 | v0.2.0 | 0.8.0 and later | 0.9.0-beta |
 | v0.1.x | not version-aware: renders the newest keys for every cluster (0.8.x ignores the ones it does not know) | — |
 
-What v0.3.1 renders per version:
+What v0.3.2 renders per version:
 
 | Capability | HyperbyteDB | For older versions the operator |
 |---|---|---|
@@ -55,6 +56,15 @@ The source of truth is `CompatibilityMatrix` in
 
 ## Upgrading
 
+- v0.3.1 → v0.3.2: a pool stuck in a rolling restart recovers by itself.
+  The proxy Deployment is applied before the rolling restart, so a broken
+  proxy is fixed even while a restart waits on it; proxies are excluded
+  from and included in a restart when their process runs, Ready or not
+  (a one-node pool's proxies are not Ready while its only backend is
+  excluded), and proxies that are not running are skipped; a restart that
+  has excluded nothing while no update is pending is cleared. A `Degraded`
+  condition is set back to `False` once a reconcile completes. No pod
+  template changes.
 - v0.3.0 → v0.3.1: a proxy on 0.9.0-beta or later is probed on its admin
   listener (port 8087, or 8088 when the proxy's client port is 8087).
   v0.3.0 probed `/healthz` and `/readyz` on the client port, where those
