@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -511,11 +512,19 @@ func (c *Client) ExcludeProxyBackend(ctx context.Context, proxyHost string, port
 		return fmt.Errorf("exclude backend %s: %w", ip, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
+	switch {
+	// 409: already excluded (a retry after another proxy failed). As an
+	// error it made every retry fail on the proxies that had done it.
+	case resp.StatusCode == http.StatusOK, resp.StatusCode == http.StatusConflict:
+		return nil
+	// The proxy's own 404 for a backend not in its pool: it does not route
+	// there either. Any other 404 (a wrong port or path) stays an error.
+	case resp.StatusCode == http.StatusNotFound && strings.Contains(string(respBody), "not found in pool"):
+		return nil
+	default:
 		return fmt.Errorf("exclude backend %s returned %d: %s", ip, resp.StatusCode, string(respBody))
 	}
-	return nil
 }
 
 // IncludeProxyBackend tells the proxy to resume routing to the given backend IP.

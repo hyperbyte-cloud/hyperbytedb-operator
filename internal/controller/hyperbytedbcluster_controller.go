@@ -205,6 +205,17 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return r.setFailedStatus(ctx, cluster, "ScaleDownFailed", err)
 	}
 
+	// 6a'. Proxy (optional; enabled by default, spec.proxy.enabled=false to
+	// skip). Before the rolling restart, which coordinates through the
+	// proxies and can return early on every pass: applied after it, a
+	// broken proxy Deployment (v0.3.0 probed 0.9 proxies on the wrong port)
+	// was never fixed while a restart was waiting on that proxy.
+	if hyperbytedb.ProxyEnabled(cluster) {
+		if err := r.reconcileProxy(ctx, cluster); err != nil {
+			log.Error(err, "Failed to reconcile proxy")
+		}
+	}
+
 	// 6b. Operator-driven rolling restart coordination. When the StatefulSet
 	// has a pending rolling update and the proxy is enabled, the operator
 	// orchestrates pod-by-pod exclusion from the proxy, drain wait, pod
@@ -254,14 +265,6 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 		log.Error(err, "Failed to reconcile HPA")
 	}
 
-	// 11b. Proxy (optional). Enabled by default; set spec.proxy.enabled=false
-	// to skip reconciliation.
-	if hyperbytedb.ProxyEnabled(cluster) {
-		if err := r.reconcileProxy(ctx, cluster); err != nil {
-			log.Error(err, "Failed to reconcile proxy")
-		}
-	}
-
 	// 12. Collect member statuses
 	memberStatuses := r.Members.CollectMemberStatuses(ctx, cluster, cluster.Namespace, replicas)
 	cluster.Status.Members = memberStatuses
@@ -298,7 +301,16 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 		log.Error(err, "Auto-failover handling failed")
 	}
 
-	// 16. Update status
+	// 16. Update status. Reaching here means every step succeeded, so a
+	// Degraded condition from an earlier failure no longer holds; it stayed
+	// True on healthy clusters because nothing cleared it.
+	meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
+		Type:               "Degraded",
+		Status:             metav1.ConditionFalse,
+		Reason:             "Reconciled",
+		Message:            "the last reconcile completed",
+		ObservedGeneration: cluster.Generation,
+	})
 	r.updateStatus(ctx, cluster, stsResult, configHash)
 
 	return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
@@ -562,6 +574,20 @@ func (r *HyperbytedbClusterReconciler) reconcileRollingRestart(
 		return nil, nil
 	}
 
+	// A restart that has not excluded anything yet while no update is
+	// pending any more has nothing to do. Such a state held a pool's
+	// rolling restart (and the proxy fix behind it) until it was cleared
+	// by hand.
+	if state := cluster.Status.RollingRestart; !rollingUpgrade && state != nil &&
+		state.Phase == hyperbytedbv1alpha1.RollingRestartExcluding && !state.ExcludeConfirmed {
+		cluster.Status.RollingRestart = nil
+		if err := r.Status().Update(ctx, cluster); err != nil {
+			return nil, err
+		}
+		logf.FromContext(ctx).Info("Cleared a rolling restart that had not started and has no pending update")
+		return nil, nil
+	}
+
 	// The proxies' admin API: its own listener from proxy 0.9.0-beta, else
 	// the proxy's client port (spec.proxy.port, not the database's).
 	proxyPort := hyperbytedb.ProxyAdminPort(cluster)
@@ -812,49 +838,50 @@ func isPodReady(pod *corev1.Pod) bool {
 	return false
 }
 
-// excludeFromAllProxies sends the exclude command to every proxy pod
-// individually, so the exclusion takes effect on all proxy instances (the
-// ClusterIP Service only round-robins to one). Returns an error if any
-// proxy pod is not ready so the caller retries.
+// excludeFromAllProxies tells every running proxy pod to stop routing to
+// backendIP (each pod individually: the ClusterIP Service only reaches one).
 func (r *HyperbytedbClusterReconciler) excludeFromAllProxies(
 	ctx context.Context,
 	cluster *hyperbytedbv1alpha1.HyperbytedbCluster,
 	backendIP string,
 	proxyPort int32,
 ) error {
-	proxyPods := &corev1.PodList{}
-	if err := r.List(ctx, proxyPods,
-		client.InNamespace(cluster.Namespace),
-		client.MatchingLabels{
-			"app.kubernetes.io/name":       "hyperbytedb-proxy",
-			"app.kubernetes.io/instance":   cluster.Name,
-			"app.kubernetes.io/managed-by": "hyperbytedb-operator",
-			"app.kubernetes.io/component":  "proxy",
-		},
-	); err != nil {
-		return fmt.Errorf("listing proxy pods: %w", err)
-	}
-	for i := range proxyPods.Items {
-		pod := &proxyPods.Items[i]
-		if pod.Status.PodIP == "" || !isPodReady(pod) {
-			return fmt.Errorf("proxy pod %s not ready (IP=%s, ready=%v), will retry", pod.Name, pod.Status.PodIP, isPodReady(pod))
-		}
-		if err := r.Members.Client.ExcludeProxyBackend(ctx, pod.Status.PodIP, proxyPort, backendIP); err != nil {
-			return fmt.Errorf("exclude on proxy pod %s: %w", pod.Name, err)
-		}
-	}
-	return nil
+	return r.forEachRunningProxy(ctx, cluster, func(pod *corev1.Pod) error {
+		return r.Members.Client.ExcludeProxyBackend(ctx, pod.Status.PodIP, proxyPort, backendIP)
+	})
 }
 
-// includeFromAllProxies sends the include command to every proxy pod.
-// Returns an error if any proxy pod is not ready, so the caller retries —
-// skipping a proxy would leave a stale exclusion on that instance.
+// includeFromAllProxies tells every running proxy pod to route to backendIP
+// again.
 func (r *HyperbytedbClusterReconciler) includeFromAllProxies(
 	ctx context.Context,
 	cluster *hyperbytedbv1alpha1.HyperbytedbCluster,
 	backendIP string,
 	proxyPort int32,
 ) error {
+	return r.forEachRunningProxy(ctx, cluster, func(pod *corev1.Pod) error {
+		return r.Members.Client.IncludeProxyBackend(ctx, pod.Status.PodIP, proxyPort, backendIP)
+	})
+}
+
+// forEachRunningProxy calls send for every proxy pod whose proxy process is
+// running, ready or not, and skips the rest.
+//
+// It used to require every proxy pod to be Ready and retried until they
+// were, which deadlocked twice over. A proxy that is down (crash-looping,
+// or a Deployment the operator had not yet fixed) never became Ready, so a
+// rolling restart waited on it forever. And a proxy is Ready only with a
+// routable backend: on a one-node pool, excluding the only backend makes
+// every proxy un-Ready, so the include that would make them Ready again
+// never went out. The admin API answers whenever the process runs, and a
+// proxy that is not running holds no exclusions (they are in memory): it
+// starts with none.
+func (r *HyperbytedbClusterReconciler) forEachRunningProxy(
+	ctx context.Context,
+	cluster *hyperbytedbv1alpha1.HyperbytedbCluster,
+	send func(*corev1.Pod) error,
+) error {
+	log := logf.FromContext(ctx)
 	proxyPods := &corev1.PodList{}
 	if err := r.List(ctx, proxyPods,
 		client.InNamespace(cluster.Namespace),
@@ -869,14 +896,30 @@ func (r *HyperbytedbClusterReconciler) includeFromAllProxies(
 	}
 	for i := range proxyPods.Items {
 		pod := &proxyPods.Items[i]
-		if pod.Status.PodIP == "" || !isPodReady(pod) {
-			return fmt.Errorf("proxy pod %s not ready (IP=%s, ready=%v), will retry", pod.Name, pod.Status.PodIP, isPodReady(pod))
+		if !proxyRunning(pod) {
+			log.Info("Skipping proxy pod that is not running", "pod", pod.Name, "ip", pod.Status.PodIP)
+			continue
 		}
-		if err := r.Members.Client.IncludeProxyBackend(ctx, pod.Status.PodIP, proxyPort, backendIP); err != nil {
-			return fmt.Errorf("include on proxy pod %s: %w", pod.Name, err)
+		if err := send(pod); err != nil {
+			return fmt.Errorf("proxy pod %s: %w", pod.Name, err)
 		}
 	}
 	return nil
+}
+
+// proxyRunning reports whether the pod's proxy container is running, so its
+// admin API can answer: it has an IP, is not being deleted, and the "proxy"
+// container is in the Running state.
+func proxyRunning(pod *corev1.Pod) bool {
+	if pod.Status.PodIP == "" || pod.DeletionTimestamp != nil {
+		return false
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.Name == "proxy" {
+			return cs.State.Running != nil
+		}
+	}
+	return false
 }
 
 // ---------- Scale-down handling ----------

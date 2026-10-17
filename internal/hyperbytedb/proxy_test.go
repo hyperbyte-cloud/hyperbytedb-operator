@@ -1,6 +1,11 @@
 package hyperbytedb
 
 import (
+	"context"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -132,5 +137,35 @@ func TestTheProxyServiceExposesOnlyTheClientPort(t *testing.T) {
 	svc := BuildProxyService(proxyCluster("0.9.1-beta", "", 0))
 	if len(svc.Spec.Ports) != 1 || svc.Spec.Ports[0].Name != httpPortName {
 		t.Errorf("service ports = %v, want only %s", svc.Spec.Ports, httpPortName)
+	}
+}
+
+// Exclude is asked again after a partial failure: a proxy that already did it
+// answers 409, and one that has no such backend answers its own 404. Both
+// are done; any other 404 (a wrong port or path, as v0.3.0's) is not.
+func TestExcludeTreatsAlreadyDoneAsDone(t *testing.T) {
+	cases := []struct {
+		status int
+		body   string
+		ok     bool
+	}{
+		{http.StatusOK, `{"status":"excluded"}`, true},
+		{http.StatusConflict, `{"status":"already_excluded"}`, true},
+		{http.StatusNotFound, `{"status":"error","message":"backend 10.0.0.9 not found in pool"}`, true},
+		{http.StatusNotFound, `not found`, false},
+		{http.StatusInternalServerError, `boom`, false},
+	}
+	for _, tc := range cases {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(tc.status)
+			_, _ = w.Write([]byte(tc.body))
+		}))
+		host, portStr, _ := net.SplitHostPort(srv.Listener.Addr().String())
+		port, _ := strconv.Atoi(portStr)
+		err := NewClient().ExcludeProxyBackend(context.Background(), host, int32(port), "10.0.0.9")
+		if (err == nil) != tc.ok {
+			t.Errorf("%d %q: err = %v, want ok=%v", tc.status, tc.body, err, tc.ok)
+		}
+		srv.Close()
 	}
 }
