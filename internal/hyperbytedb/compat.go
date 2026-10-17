@@ -48,6 +48,10 @@ const (
 	// auth.cluster_token and auth.admin_username / admin_password: a
 	// cluster with auth on can reach its own internal routes.
 	CapabilityClusterAuth Capability = "cluster-auth"
+	// The proxy serves /healthz, /readyz, /metrics and /admin on its own
+	// admin listener (HYPERBYTEDB_PROXY_ADMIN_LISTEN) and answers 404 for
+	// them on its client port. A proxy capability: see ProxySupports.
+	CapabilityProxyAdminListener Capability = "proxy-admin-listener"
 )
 
 // CompatibilityEntry is one row of the compatibility matrix.
@@ -68,6 +72,7 @@ var CompatibilityMatrix = []CompatibilityEntry{
 	{CapabilityControlListener, "0.9.0-beta", "ignores the control-listener annotation (no control port, liveness on the server port)"},
 	{CapabilityEvacuateTogether, "0.9.0-beta", "ignores the evacuate-together annotation (departing nodes leave one at a time)"},
 	{CapabilityClusterAuth, "0.9.1-beta", "renders auth.enabled only; no auth Secret, so a cluster with auth on cannot reach its internal routes"},
+	{CapabilityProxyAdminListener, "0.9.0-beta", "probes the proxy and calls its admin API on its client port, where proxies before 0.9.0-beta serve them"},
 }
 
 // DatabaseVersion is the HyperbyteDB version a cluster is rendered for.
@@ -124,6 +129,22 @@ func ResolveDatabaseVersion(cluster *v1alpha1.HyperbytedbCluster) DatabaseVersio
 	}
 	v, _ := parseDatabaseVersion(LatestDatabaseVersion)
 	return DatabaseVersion{Version: v, Source: "assumed", Raw: LatestDatabaseVersion}
+}
+
+// ResolveProxyVersion is the version of the proxy the cluster runs: the tag
+// of its proxy image when that is a version (spec.proxy.image may pin one),
+// else the cluster's database version, which the proxy image follows.
+func ResolveProxyVersion(cluster *v1alpha1.HyperbytedbCluster) *semver.Version {
+	if v, ok := parseDatabaseVersion(imageTag(ResolveProxyImage(cluster))); ok {
+		return v
+	}
+	return ResolveDatabaseVersion(cluster).Version
+}
+
+// ProxySupports reports whether the cluster's proxy version has the
+// capability.
+func ProxySupports(cluster *v1alpha1.HyperbytedbCluster, capability Capability) bool {
+	return versionSupports(ResolveProxyVersion(cluster), capability)
 }
 
 // Supports reports whether the cluster's database version has the capability.
