@@ -20,7 +20,7 @@ spec:
     maxPointsPerBatch: 50000
   chdb:
     sessionDataPath: /var/lib/hyperbytedb/chdb
-    poolSize: 1
+    queryPoolSize: 12
   retention:
     enabled: true
     interval: 60s

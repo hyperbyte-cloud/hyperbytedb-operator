@@ -76,7 +76,7 @@ configurable values.
 ```sh
 helm upgrade hyperbytedb-operator \
   oci://ghcr.io/hyperbyte-cloud/charts/hyperbytedb-operator \
-  --version 0.2.0 \
+  --version 0.3.0 \
   --namespace hyperbytedb-operator-system \
   --reuse-values
 ```
@@ -141,6 +141,13 @@ The operator manages three CRDs:
 - **HyperbytedbRestore** -- Restores a cluster from an existing backup, coordinating scale-down, data copy, and scale-up automatically.
 
 See `config/samples/` for example manifests.
+
+## HyperbyteDB versions
+
+The operator works out which HyperbyteDB version each cluster runs (from
+`spec.version`, the image tag, or the `hyperbytedb.hyperbyte.cloud/database-version`
+annotation) and renders only what that version supports. See
+[docs/compatibility.md](docs/compatibility.md) for the matrix.
 
 ## Development
 

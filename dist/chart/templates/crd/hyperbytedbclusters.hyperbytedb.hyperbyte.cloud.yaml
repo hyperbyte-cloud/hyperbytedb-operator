@@ -2979,7 +2979,8 @@ spec:
                   poolSize:
                     description: |-
                       Sets both query and write pool sizes when QueryPoolSize and WritePoolSize
-                      are unset. Defaults to 1 when all pool fields are unset.
+                      are unset. When all pool fields are unset the query pool is 12 and the
+                      write pool 1.
                     format: int32
                     minimum: 1
                     type: integer
@@ -3023,7 +3024,11 @@ spec:
                     format: int32
                     type: integer
                   raftHeartbeatIntervalMs:
-                    default: 1000
+                    default: 300
+                    description: |-
+                      Must be below raftElectionTimeoutMs: Raft refuses to start otherwise.
+                      The default was 1000, equal to the election timeout's, and a cluster
+                      that kept both defaults crash-looped.
                     format: int32
                     type: integer
                   raftSnapshotThreshold:
@@ -3131,6 +3136,10 @@ spec:
                     - enabled
                     type: object
                 type: object
+                x-kubernetes-validations:
+                - message: raftHeartbeatIntervalMs must be below raftElectionTimeoutMs
+                  rule: '!has(self.raftHeartbeatIntervalMs) || !has(self.raftElectionTimeoutMs)
+                    || self.raftHeartbeatIntervalMs < self.raftElectionTimeoutMs'
               failover:
                 description: FailoverSpec controls automatic failure detection and
                   recovery.
@@ -3592,8 +3601,18 @@ spec:
               sharding:
                 description: |-
                   Experimental series sharding. When set, the operator writes a `[sharding]`
-                  block into config.toml. Enabling it requires replicas > 1 (cluster mode).
+                  block into config.toml. A 1-replica CR with sharding.enabled is a
+                  1-member cluster ([cluster] enabled=true). Defaults stay off.
                 properties:
+                  addPeerProposalsEnabled:
+                    description: |-
+                      Propose AddPeer shard-map ops. Defaults to true when unset.
+
+                      Set false for the duration of a rolling upgrade of a sharded cluster: a
+                      node running a build that predates the op cannot decode it, rejects the
+                      Raft append RPC carrying it, and stops replicating until every node is
+                      upgraded. Re-enable once the rollout completes.
+                    type: boolean
                   bootstrapTimeoutMs:
                     description: Sync bootstrap RPC timeout.
                     format: int64
@@ -3643,6 +3662,14 @@ spec:
                     format: int64
                     minimum: 1
                     type: integer
+                  removePeerProposalsEnabled:
+                    description: |-
+                      Propose RemovePeer shard-map ops. Defaults to true when unset.
+
+                      Carries the identical rolling-upgrade hazard as AddPeerProposalsEnabled,
+                      and scale-down evacuation depends on it: leaving it false prevents a
+                      decommissioning node from ever releasing its regions.
+                    type: boolean
                   replicationFactor:
                     description: Target replica count per shard region.
                     format: int32

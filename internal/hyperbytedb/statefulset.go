@@ -21,6 +21,14 @@ const (
 	// podTerminationGraceSecs is the kubelet grace budget (includes preStop). Keep
 	// comfortably above drainAckWaitSecs + headroom for flush + SIGTERM cleanup.
 	podTerminationGraceSecs = 120
+	// containerName is the database container's name in every pod.
+	containerName = "hyperbytedb"
+	// httpPortName names the database's HTTP port on pods and Services.
+	httpPortName = "http"
+	// defaultLogLevel is the log level without spec.logging.level.
+	defaultLogLevel = "info"
+	// annotationTrue is the value that turns an opt-in annotation on.
+	annotationTrue = "true"
 )
 
 func StatefulSetName(cluster *v1alpha1.HyperbytedbCluster) string {
@@ -139,10 +147,25 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 	if cluster.Spec.ChDB.SessionDataPath != "" {
 		chdbPath = cluster.Spec.ChDB.SessionDataPath
 	}
+	// The image bakes HYPERBYTEDB__LOGGING__LEVEL=info, and the HYPERBYTEDB__*
+	// env overlay is applied OVER the mounted config.toml. Rendering the level
+	// into the ConfigMap alone therefore did nothing -- spec.logging.level was
+	// inert, and a sharded cluster could not be put into debug to diagnose a
+	// placement or staging failure at all. Set it as env, like the four other
+	// image defaults this block already restates, so the CR field wins.
+	logLevel := defaultLogLevel
+	if cluster.Spec.Logging.Level != "" {
+		logLevel = cluster.Spec.Logging.Level
+	}
 	env := []corev1.EnvVar{
 		{Name: "HYPERBYTEDB__STORAGE__WAL_DIR", Value: defaultWalDir},
 		{Name: "HYPERBYTEDB__STORAGE__META_DIR", Value: defaultMetaDir},
 		{Name: "HYPERBYTEDB__CHDB__SESSION_DATA_PATH", Value: chdbPath},
+		{Name: "HYPERBYTEDB__LOGGING__LEVEL", Value: logLevel},
+	}
+	clusterAuth := ClusterAuthEnabled(cluster)
+	if clusterAuth {
+		env = append(env, authEnv(cluster)...)
 	}
 	// Cluster mode and paths come from mounted config.toml (hot-updated on scale);
 	// avoid replica-dependent env vars so the pod template stays stable across scale events.
@@ -171,12 +194,23 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		probeScheme = corev1.URISchemeHTTPS
 	}
 
+	// Liveness goes to the control listener when the cluster opts in: it is
+	// served on the database's control runtime, so a node saturated with
+	// writes still answers. On the main port, /ping queued behind write work
+	// past the 3s timeout and kubelet killed busy but healthy nodes.
+	livenessPort := intstr.FromString(httpPortName)
+	livenessScheme := probeScheme
+	controlListener := ControlListenerEnabled(cluster, clusterEnabled)
+	if controlListener {
+		livenessPort = intstr.FromString("control")
+		livenessScheme = corev1.URISchemeHTTP
+	}
 	livenessProbe := &corev1.Probe{
 		ProbeHandler: corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{
 				Path:   "/ping",
-				Port:   intstr.FromString("http"),
-				Scheme: probeScheme,
+				Port:   livenessPort,
+				Scheme: livenessScheme,
 			},
 		},
 		InitialDelaySeconds: 15,
@@ -188,7 +222,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		ProbeHandler: corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{
 				Path:   "/health",
-				Port:   intstr.FromString("http"),
+				Port:   intstr.FromString(httpPortName),
 				Scheme: probeScheme,
 			},
 		},
@@ -209,7 +243,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 		ProbeHandler: corev1.ProbeHandler{
 			HTTPGet: &corev1.HTTPGetAction{
 				Path:   "/ping",
-				Port:   intstr.FromString("http"),
+				Port:   intstr.FromString(httpPortName),
 				Scheme: probeScheme,
 			},
 		},
@@ -221,30 +255,24 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 
 	// --------------- main container ---------------
 	mainContainer := corev1.Container{
-		Name:            "hyperbytedb",
+		Name:            containerName,
 		Image:           image,
 		ImagePullPolicy: pullPolicy,
 		Command:         []string{"sh", "/entrypoint/start.sh"},
 		Env:             env,
-		Ports: []corev1.ContainerPort{
-			{
-				Name:          "http",
-				ContainerPort: port,
-				Protocol:      corev1.ProtocolTCP,
-			},
-		},
-		VolumeMounts:   volumeMounts,
-		StartupProbe:   startupProbe,
-		LivenessProbe:  livenessProbe,
-		ReadinessProbe: readinessProbe,
-		Resources:      cluster.Spec.Resources,
+		Ports:           containerPorts(port, controlListener, ControlPort(cluster)),
+		VolumeMounts:    volumeMounts,
+		StartupProbe:    startupProbe,
+		LivenessProbe:   livenessProbe,
+		ReadinessProbe:  readinessProbe,
+		Resources:       cluster.Spec.Resources,
 	}
 
 	if clusterEnabled {
 		mainContainer.Lifecycle = &corev1.Lifecycle{
 			PreStop: &corev1.LifecycleHandler{
 				Exec: &corev1.ExecAction{
-					Command: []string{"sh", "-c", clusterPreStopScript(port)},
+					Command: []string{"sh", "-c", clusterPreStopScript(port, clusterAuth)},
 				},
 			},
 		}
@@ -328,7 +356,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 			Selector: &metav1.LabelSelector{
 				MatchLabels: CommonLabels(cluster),
 			},
-			PodManagementPolicy: podManagementPolicy(clusterEnabled),
+			PodManagementPolicy: podManagementPolicy(cluster, clusterEnabled),
 			UpdateStrategy: appsv1.StatefulSetUpdateStrategy{
 				Type: appsv1.RollingUpdateStatefulSetStrategyType,
 			},
@@ -353,8 +381,28 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 	return sts
 }
 
-func podManagementPolicy(clusterEnabled bool) appsv1.PodManagementPolicyType {
-	if clusterEnabled {
+// EvacuateTogetherAnnotation opts a cluster into decommissioning every
+// departing node of a scale-down at once instead of one at a time.
+const EvacuateTogetherAnnotation = "hyperbytedb.hyperbyte.cloud/evacuate-together"
+
+// EvacuateTogether reports whether a scale-down evacuates all departing nodes
+// at once. Opt-in: an older database may not expect several at a time.
+func EvacuateTogether(cluster *v1alpha1.HyperbytedbCluster) bool {
+	return cluster.Annotations[EvacuateTogetherAnnotation] == annotationTrue &&
+		Supports(cluster, CapabilityEvacuateTogether)
+}
+
+// ParallelPodsAnnotation opts a cluster into Parallel pod management.
+const ParallelPodsAnnotation = "hyperbytedb.hyperbyte.cloud/parallel-pods"
+
+// podManagementPolicy is OrderedReady for a cluster unless it opts into
+// Parallel. Under OrderedReady a departing node reports unready, and the
+// StatefulSet will not create a pod above an unready one: on n3 a pod deleted
+// during a scale-down was never recreated, and a full restart of 8 pods took
+// over an hour, one pod at a time. Opt-in, because an existing cluster's
+// policy cannot change in place (the controller recreates its StatefulSet).
+func podManagementPolicy(cluster *v1alpha1.HyperbytedbCluster, clusterEnabled bool) appsv1.PodManagementPolicyType {
+	if clusterEnabled && cluster.Annotations[ParallelPodsAnnotation] != annotationTrue {
 		return appsv1.OrderedReadyPodManagement
 	}
 	return appsv1.ParallelPodManagement
@@ -364,13 +412,38 @@ func podManagementPolicy(clusterEnabled bool) appsv1.PodManagementPolicyType {
 // reports state=leaving (flush + replication acks + peer leave complete) or
 // until drainAckWaitSecs elapses. A fixed sleep is insufficient because
 // DrainService may wait up to 60s for peer replication acks alone.
-func clusterPreStopScript(port int32) string {
-	return fmt.Sprintf(`curl -sf -X POST http://localhost:%[1]d/internal/drain || true
+//
+// With cluster auth the curls send the cluster token from the pod's env;
+// without it the script is unchanged, so existing pods are not restarted.
+func clusterPreStopScript(port int32, clusterAuth bool) string {
+	auth := ""
+	if clusterAuth {
+		auth = ` -H "` + ClusterTokenHeader + `: $HYPERBYTEDB__AUTH__CLUSTER_TOKEN"`
+	}
+	return fmt.Sprintf(`curl -sf%[3]s -X POST http://localhost:%[1]d/internal/drain || true
 for i in $(seq 1 %[2]d); do
-  if curl -sf http://localhost:%[1]d/cluster/metrics 2>/dev/null | grep -q '"state":"leaving"'; then
+  if curl -sf%[3]s http://localhost:%[1]d/cluster/metrics 2>/dev/null | grep -q '"state":"leaving"'; then
     exit 0
   fi
   sleep 1
 done
-exit 0`, port, drainAckWaitSecs)
+exit 0`, port, drainAckWaitSecs, auth)
+}
+
+// containerPorts lists the main port and, when enabled, the control
+// listener's port.
+func containerPorts(port int32, controlListener bool, controlPort int32) []corev1.ContainerPort {
+	ports := []corev1.ContainerPort{{
+		Name:          "http",
+		ContainerPort: port,
+		Protocol:      corev1.ProtocolTCP,
+	}}
+	if controlListener {
+		ports = append(ports, corev1.ContainerPort{
+			Name:          "control",
+			ContainerPort: controlPort,
+			Protocol:      corev1.ProtocolTCP,
+		})
+	}
+	return ports
 }

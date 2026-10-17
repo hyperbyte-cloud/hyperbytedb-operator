@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -146,6 +147,16 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return r.setFailedStatus(ctx, cluster, "TLSFailed", err)
 	}
 
+	// 1b. Auth Secret. Every call the operator makes to the cluster from here
+	// on sends its cluster token.
+	if hyperbytedb.ClusterAuthEnabled(cluster) {
+		token, err := r.reconcileAuthSecret(ctx, cluster)
+		if err != nil {
+			return r.setFailedStatus(ctx, cluster, "AuthSecretFailed", err)
+		}
+		ctx = hyperbytedb.WithClusterToken(ctx, token)
+	}
+
 	// 2. ConfigMap
 	if err := r.reconcileConfigMap(ctx, cluster); err != nil {
 		return r.setFailedStatus(ctx, cluster, "ConfigMapFailed", err)
@@ -170,7 +181,12 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// 5b. Scale-down: drain departing pods and notify survivors before the StatefulSet shrinks.
 	// Errors per-pod are already logged inside the hook and intentionally non-fatal.
-	r.runScaleDownClusterHooks(ctx, cluster, prevSTSReplicas, replicas)
+	if !r.runScaleDownClusterHooks(ctx, cluster, prevSTSReplicas, replicas) {
+		// Regions are still moving off a departing node. Hold .spec.replicas
+		// where it is and check again shortly; shrinking now would delete a
+		// pod, and later its volume, mid-transfer.
+		return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	}
 
 	// 6. StatefulSet
 	stsResult, err := r.reconcileStatefulSet(ctx, cluster, configHash)
@@ -179,6 +195,14 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 			return ctrl.Result{Requeue: true}, nil
 		}
 		return r.setFailedStatus(ctx, cluster, "StatefulSetFailed", err)
+	}
+	if stsResult.Recreating {
+		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+	}
+
+	// 6a. Finish a scale-down the StatefulSet controller cannot.
+	if err := r.deleteStuckDepartedPods(ctx, cluster, stsResult); err != nil {
+		return r.setFailedStatus(ctx, cluster, "ScaleDownFailed", err)
 	}
 
 	// 6b. Operator-driven rolling restart coordination. When the StatefulSet
@@ -242,6 +266,20 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 	memberStatuses := r.Members.CollectMemberStatuses(ctx, cluster, cluster.Namespace, replicas)
 	cluster.Status.Members = memberStatuses
 	cluster.Status.ClusterState = hyperbytedb.DeriveClusterState(memberStatuses)
+	// Which HyperbyteDB version the config and pods are rendered for, and
+	// what is left out for it (see hyperbytedb.CompatibilityMatrix).
+	versionReason, versionMessage := hyperbytedb.CompatibilitySummary(cluster)
+	versionStatus := metav1.ConditionTrue
+	if versionReason == "OlderThanSupported" {
+		versionStatus = metav1.ConditionFalse
+	}
+	meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
+		Type:               "DatabaseVersion",
+		Status:             versionStatus,
+		Reason:             versionReason,
+		Message:            versionMessage,
+		ObservedGeneration: cluster.Generation,
+	})
 
 	// 13. Cluster membership reconciliation (multi-node only).
 	// Asks the Raft leader (via API) to add any pod that is reachable but
@@ -303,6 +341,48 @@ func (r *HyperbytedbClusterReconciler) reconcileTLS(ctx context.Context, cluster
 
 	r.Recorder.Event(cluster, corev1.EventTypeNormal, "TLSCreated", "Generated self-signed TLS certificate")
 	return r.Create(ctx, secret)
+}
+
+// reconcileAuthSecret makes sure the auth Secret exists with every key,
+// generating what is missing, and returns the cluster token. A Secret the
+// operator names (<cluster>-auth) is owned by the cluster and goes with it;
+// one named in spec.auth.credentialsSecretName is the user's and is kept.
+func (r *HyperbytedbClusterReconciler) reconcileAuthSecret(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster) (string, error) {
+	name := hyperbytedb.AuthSecretName(cluster)
+	secret := &corev1.Secret{}
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: cluster.Namespace}, secret)
+	switch {
+	case apierrors.IsNotFound(err):
+		secret, err = hyperbytedb.BuildAuthSecret(cluster)
+		if err != nil {
+			return "", fmt.Errorf("generating auth secret: %w", err)
+		}
+		if cluster.Spec.Auth.CredentialsSecretName == "" {
+			if err := controllerutil.SetControllerReference(cluster, secret, r.Scheme); err != nil {
+				return "", err
+			}
+		}
+		if err := r.Create(ctx, secret); err != nil {
+			return "", err
+		}
+		r.Recorder.Event(cluster, corev1.EventTypeNormal, "AuthSecretCreated",
+			fmt.Sprintf("Generated cluster token and admin login in Secret %s", name))
+	case err != nil:
+		return "", err
+	default:
+		changed, err := hyperbytedb.FillAuthSecret(secret)
+		if err != nil {
+			return "", err
+		}
+		if changed {
+			if err := r.Update(ctx, secret); err != nil {
+				return "", err
+			}
+			r.Recorder.Event(cluster, corev1.EventTypeNormal, "AuthSecretUpdated",
+				fmt.Sprintf("Added missing keys to Secret %s", name))
+		}
+	}
+	return string(secret.Data[hyperbytedb.AuthSecretClusterTokenKey]), nil
 }
 
 // ---------- ConfigMap ----------
@@ -374,6 +454,12 @@ func (r *HyperbytedbClusterReconciler) reconcileService(ctx context.Context, clu
 type stsReconcileResult struct {
 	SpecReplicas  int32
 	ReadyReplicas int32
+	// StatusReplicas is how many pods the StatefulSet currently has. It
+	// stays above SpecReplicas while a scale-down is still deleting pods.
+	StatusReplicas int32
+	// Recreating is set while the StatefulSet is being deleted to change a
+	// field that cannot be updated in place; the reconcile waits for it.
+	Recreating bool
 }
 
 func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, configHash string) (stsReconcileResult, error) {
@@ -393,6 +479,19 @@ func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context,
 	}
 	if err != nil {
 		return stsReconcileResult{}, err
+	}
+
+	// podManagementPolicy cannot be updated in place. Delete the StatefulSet
+	// leaving its pods running (orphaned); the next reconcile recreates it,
+	// and the new StatefulSet adopts the pods by their labels.
+	if existing.Spec.PodManagementPolicy != desired.Spec.PodManagementPolicy {
+		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, "RecreatingStatefulSet",
+			"Recreating StatefulSet to change pod management from %s to %s; pods keep running",
+			existing.Spec.PodManagementPolicy, desired.Spec.PodManagementPolicy)
+		if err := r.Delete(ctx, existing, client.PropagationPolicy(metav1.DeletePropagationOrphan)); err != nil && !apierrors.IsNotFound(err) {
+			return stsReconcileResult{}, err
+		}
+		return stsReconcileResult{Recreating: true}, nil
 	}
 
 	// Update mutable fields
@@ -426,8 +525,9 @@ func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context,
 	}
 
 	return stsReconcileResult{
-		SpecReplicas:  *existing.Spec.Replicas,
-		ReadyReplicas: existing.Status.ReadyReplicas,
+		SpecReplicas:   *existing.Spec.Replicas,
+		ReadyReplicas:  existing.Status.ReadyReplicas,
+		StatusReplicas: existing.Status.Replicas,
 	}, nil
 }
 
@@ -783,9 +883,18 @@ func (r *HyperbytedbClusterReconciler) includeFromAllProxies(
 // surviving members to drop them from membership. Must run before .spec.replicas is reduced.
 // Per-pod failures are logged and ignored: the StatefulSet scale-down still proceeds because
 // the membership/drain endpoints are best-effort hints to surviving nodes.
-func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, prevReplicas, desiredReplicas int32) {
+// runScaleDownClusterHooks decommissions the pods that are leaving and reports
+// whether they have finished evacuating.
+//
+// Returns false while any departing node still owns regions. The caller must
+// not reduce .spec.replicas until it returns true: deleting the pod (and, on
+// the next pass, its PVC) while regions are still moving off it destroys the
+// only remaining copy of whatever had not yet transferred. Evacuation time is
+// a function of how much data the node holds, so no fixed grace period is
+// safe -- the node itself reports when it is done, by reaching "leaving".
+func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, prevReplicas, desiredReplicas int32) bool {
 	if desiredReplicas >= prevReplicas || prevReplicas < 1 {
-		return
+		return true
 	}
 
 	log := logf.FromContext(ctx)
@@ -793,12 +902,68 @@ func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Cont
 	stsName := hyperbytedb.StatefulSetName(cluster)
 	headlessSvc := hyperbytedb.HeadlessServiceName(cluster)
 
+	// Highest ordinal first, matching the order the StatefulSet will remove
+	// them. One at a time unless the cluster opts into evacuating together
+	// (see departurePlan).
+	together := hyperbytedb.EvacuateTogether(cluster)
+	var departing []departingNode
+	var departHosts []string
 	for i := prevReplicas - 1; i >= desiredReplicas; i-- {
 		host := fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local",
 			stsName, i, headlessSvc, cluster.Namespace)
-		if err := r.Members.Client.DrainNode(ctx, host, port); err != nil {
-			log.V(1).Info("Could not drain departing pod", "ordinal", i, "host", host, "error", err)
+		health, err := r.Members.Client.GetNodeHealth(ctx, host, port)
+		state := ""
+		if health != nil {
+			state = health.State
 		}
+		if err != nil {
+			log.V(1).Info("Departing pod unreachable; not gating on it",
+				"ordinal", i, "host", host, "error", err)
+		}
+		departing = append(departing, departingNode{state: state, reachable: err == nil})
+		departHosts = append(departHosts, host)
+		if !together && err == nil && state != nodeStateLeaving {
+			// Sequential: nodes after the first one still holding data are
+			// not looked at until it has released its regions.
+			break
+		}
+	}
+	tell, evacuated := departurePlan(departing, together)
+	for _, i := range tell {
+		if err := r.Members.Client.DecommissionNode(ctx, departHosts[i], port); err != nil {
+			log.V(1).Info("Could not decommission departing pod",
+				"host", departHosts[i], "error", err)
+		}
+	}
+	if !evacuated {
+		log.Info("Waiting for departing nodes to finish evacuating",
+			"departing", len(departHosts), "together", together)
+	}
+
+	if !evacuated {
+		return false
+	}
+
+	// Drop the departing nodes from the Raft voter set before the StatefulSet
+	// deletes them. Without this they stay voters forever: shrinking 6 -> 3
+	// left 3 of 6 voters alive, which is no quorum, so the smaller cluster
+	// could not commit anything. Worse, scaling back up brought the same node
+	// ids back with empty disks while the leader still held their old
+	// progress; openraft does not support that ("log reversion") and the
+	// returning nodes crashed on their first apply.
+	hosts := make(map[uint64]string, prevReplicas)
+	for i := range prevReplicas {
+		hosts[uint64(i+1)] = fmt.Sprintf("%s-%d.%s.%s.svc.cluster.local",
+			stsName, i, headlessSvc, cluster.Namespace)
+	}
+	departed := make([]uint64, 0, prevReplicas-desiredReplicas)
+	for i := prevReplicas - 1; i >= desiredReplicas; i-- {
+		departed = append(departed, uint64(i+1))
+	}
+	if err := removeDepartedVoters(ctx, r.Members.Client, hosts, port, departed); err != nil {
+		log.Info("Holding scale-down: could not remove departing nodes from raft voters",
+			"error", err)
+		return false
 	}
 
 	for i := desiredReplicas; i < prevReplicas; i++ {
@@ -811,6 +976,159 @@ func (r *HyperbytedbClusterReconciler) runScaleDownClusterHooks(ctx context.Cont
 					"survivor", survivor, "departedNodeID", departedID, "error", err)
 			}
 		}
+	}
+	return true
+}
+
+// deleteStuckDepartedPods deletes the unready pods a scale-down has left
+// behind.
+//
+// .spec.replicas only shrinks after runScaleDownClusterHooks has confirmed
+// the departing nodes evacuated and removed them from the Raft voters, so
+// every pod at or above .spec.replicas is already out of the cluster. Such a
+// pod reports unready: it keeps campaigning for a cluster it is no longer in.
+// With OrderedReady the StatefulSet controller will not delete a pod while a
+// lower-ordinal pod is unready, so 12 -> 3 stalled with pods 3..11 alive and
+// pods 4..11 unready. The StatefulSet would delete these pods anyway; this
+// only removes the ordering block. Ready pods are left to the StatefulSet.
+func (r *HyperbytedbClusterReconciler) deleteStuckDepartedPods(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, sts stsReconcileResult) error {
+	if sts.StatusReplicas <= sts.SpecReplicas {
+		return nil
+	}
+	stsName := hyperbytedb.StatefulSetName(cluster)
+	pods := make([]*corev1.Pod, 0, sts.StatusReplicas-sts.SpecReplicas)
+	for i := sts.SpecReplicas; i < sts.StatusReplicas; i++ {
+		pod := &corev1.Pod{}
+		name := fmt.Sprintf("%s-%d", stsName, i)
+		if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: cluster.Namespace}, pod); err != nil {
+			if apierrors.IsNotFound(err) {
+				continue
+			}
+			return err
+		}
+		pods = append(pods, pod)
+	}
+	for _, pod := range stuckDepartedPods(pods) {
+		if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("deleting departed pod %s: %w", pod.Name, err)
+		}
+		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, "ScaleDown",
+			"Deleted departed pod %s that blocked the StatefulSet scale-down", pod.Name)
+	}
+	return nil
+}
+
+// stuckDepartedPods picks, from pods above .spec.replicas, the ones the
+// StatefulSet controller would wait on forever: unready and not already
+// being deleted.
+func stuckDepartedPods(pods []*corev1.Pod) []*corev1.Pod {
+	var stuck []*corev1.Pod
+	for _, pod := range pods {
+		if pod.DeletionTimestamp != nil || isPodReady(pod) {
+			continue
+		}
+		stuck = append(stuck, pod)
+	}
+	return stuck
+}
+
+// removeDepartedVoters removes each id in `departed` from the Raft voter set,
+// in order. The leader is looked up again before every removal because
+// removing the leader itself makes it step down.
+//
+// A node that is already not a voter counts as removed, so a retry after a
+// partial failure is safe.
+func removeDepartedVoters(ctx context.Context, c *hyperbytedb.Client, hosts map[uint64]string, port int32, departed []uint64) error {
+	for _, id := range departed {
+		leaderHost, err := raftLeaderHost(ctx, c, hosts, port)
+		if err != nil {
+			return err
+		}
+		if _, err := c.RemoveClusterNode(ctx, leaderHost, port, id); err != nil {
+			return fmt.Errorf("remove node %d from raft voters via %s: %w", id, leaderHost, err)
+		}
+	}
+	return nil
+}
+
+// raftLeaderHost asks each host who the leader is and returns the leader's
+// host. `hosts` maps node id to host.
+func raftLeaderHost(ctx context.Context, c *hyperbytedb.Client, hosts map[uint64]string, port int32) (string, error) {
+	ids := make([]uint64, 0, len(hosts))
+	for id := range hosts {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	for _, id := range ids {
+		info, err := c.GetClusterLeader(ctx, hosts[id], port)
+		if err != nil || info.LeaderID == nil {
+			continue
+		}
+		if h, ok := hosts[*info.LeaderID]; ok {
+			return h, nil
+		}
+	}
+	return "", fmt.Errorf("no raft leader visible")
+}
+
+const (
+	// Node states reported by /health's "state" field.
+	nodeStateDecommissioning = "decommissioning"
+	nodeStateLeaving         = "leaving"
+)
+
+// departingNodeAction decides what to do with one node that is being removed.
+//
+// `gate` false means .spec.replicas must not shrink yet. An unreachable node
+// never gates: it may already be gone, and the cluster's own dead-peer path
+// restores replication factor, so blocking forever on a pod that will never
+// answer would wedge every future scale-down.
+type departingNode struct {
+	state     string
+	reachable bool
+}
+
+// departurePlan says which departing nodes (highest ordinal first) to tell to
+// decommission now, and whether every one has evacuated.
+//
+// One at a time by default: a node is told only once every node before it
+// has released its regions. Together, all are told at once. One at a time,
+// every node evacuated still counts as a placement target, so its regions
+// land on the next nodes to leave and move again: on n3 an 8 -> 3 scale-down
+// moved node 8's copies onto nodes 4-7, and node 6 then held 61 copies to
+// move. Together, the scheduler places every copy on a staying node once.
+// spec.replicas shrinks only after all have evacuated either way.
+func departurePlan(nodes []departingNode, together bool) (tell []int, evacuated bool) {
+	evacuated = true
+	for i, n := range nodes {
+		decommission, gate := departingNodeAction(n.state, n.reachable)
+		if decommission {
+			tell = append(tell, i)
+		}
+		if gate {
+			evacuated = false
+			if !together {
+				break
+			}
+		}
+	}
+	return tell, evacuated
+}
+
+func departingNodeAction(state string, reachable bool) (decommission bool, gate bool) {
+	if !reachable {
+		return false, false
+	}
+	switch state {
+	case nodeStateLeaving:
+		// Fully evacuated; safe to delete the pod and its volume.
+		return false, false
+	case nodeStateDecommissioning:
+		// Already told; still moving regions.
+		return false, true
+	default:
+		// Still holding data and not yet told to leave.
+		return true, true
 	}
 }
 
@@ -1157,10 +1475,23 @@ func (r *HyperbytedbClusterReconciler) reconcileClusterMembership(
 	}
 
 	// The leader's view is authoritative for who is currently a member.
+	//
+	// A node the leader still lists as departed is NOT a current member. A
+	// StatefulSet keeps its PVCs on scale-down, so scaling back up restarts the
+	// same node id with its old `leaving` state, which is terminal on the
+	// database side. Treating it as known skipped add-node, so the node failed
+	// readiness forever and a cluster that had scaled down could not scale back
+	// up. Sending add-node for it is what lets the leader re-admit it.
+	//
+	// Safe against undoing a scale-down: `views` holds only ordinals below
+	// spec.replicas, so a pod still being evacuated is never in it.
 	knownIDs := make(map[uint64]bool)
 	for _, v := range views {
 		if v.host == leaderHost {
 			for _, n := range v.nodes {
+				if isDepartedState(n.State) {
+					continue
+				}
 				knownIDs[uint64(n.NodeID)] = true
 			}
 		}
@@ -1436,4 +1767,15 @@ func (r *HyperbytedbClusterReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		Owns(&policyv1.PodDisruptionBudget{}).
 		Named("hyperbytedbcluster").
 		Complete(r)
+}
+
+// isDepartedState reports whether a membership state means the node was
+// removed (decommissioned or retired) rather than merely restarting.
+func isDepartedState(state string) bool {
+	switch state {
+	case "leaving", "decommissioning":
+		return true
+	default:
+		return false
+	}
 }

@@ -17,7 +17,10 @@ type Client struct {
 
 func NewClient() *Client {
 	return &Client{
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: tokenTransport{base: http.DefaultTransport},
+		},
 	}
 }
 
@@ -40,9 +43,15 @@ type NodeInfo struct {
 
 // HealthStatus represents the structured response from /health.
 type HealthStatus struct {
-	Status  string `json:"status"` // "pass" (healthy), "syncing", "joining", "draining", "leaving"
+	Status  string `json:"status"` // "pass" (healthy), "warn", "fail"
 	Message string `json:"message,omitempty"`
 	NodeID  int    `json:"node_id,omitempty"`
+	// State is the node's own membership record: "active", "syncing",
+	// "joining", "draining", "decommissioning", "leaving". Omitted before
+	// bootstrap or on a standalone node. This is the field to gate on, not
+	// Status -- Status only says whether the node is serving traffic, and a
+	// draining node and a fully evacuated one both report "warn".
+	State string `json:"state,omitempty"`
 }
 
 // clusterNodesResponse wraps the /cluster/nodes JSON envelope.
@@ -113,6 +122,30 @@ func (c *Client) DrainNode(ctx context.Context, host string, port int32) error {
 		resp.StatusCode != http.StatusAccepted {
 		respBody, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("drain returned %d: %s", resp.StatusCode, string(respBody))
+	}
+	return nil
+}
+
+// DecommissionNode tells a node it is leaving permanently: hand off its
+// primaries, then let the cluster evacuate its regions. Unlike DrainNode this
+// makes the node ineligible to hold data, so it must only be called on a node
+// that is actually being removed -- never on a restart.
+func (c *Client) DecommissionNode(ctx context.Context, host string, port int32) error {
+	url := fmt.Sprintf("http://%s:%d/internal/decommission", host, port)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK &&
+		resp.StatusCode != http.StatusNoContent &&
+		resp.StatusCode != http.StatusAccepted {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("decommission returned %d: %s", resp.StatusCode, string(respBody))
 	}
 	return nil
 }
@@ -367,6 +400,59 @@ func (c *Client) AddClusterNode(ctx context.Context, host string, port int32, no
 	var out AddNodeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("decoding add-node response: %w", err)
+	}
+	return &out, nil
+}
+
+// RemoveNodeResponse mirrors the JSON returned by POST /cluster/membership/remove-node.
+type RemoveNodeResponse struct {
+	NodeID           uint64   `json:"node_id"`
+	RemovedFromVoter bool     `json:"removed_from_voters"`
+	LeaderID         *uint64  `json:"leader_id"`
+	RemainingVoters  []uint64 `json:"remaining_voters"`
+}
+
+type removeNodeRequest struct {
+	NodeID uint64 `json:"node_id"`
+}
+
+// RemoveClusterNode asks `host` (which must be the current Raft leader) to
+// drop `nodeID` from the Raft voter set. Removing a node that is not a voter
+// succeeds with RemovedFromVoter=false. Returns *ErrNotLeader if the target
+// is not currently the leader.
+func (c *Client) RemoveClusterNode(ctx context.Context, host string, port int32, nodeID uint64) (*RemoveNodeResponse, error) {
+	url := fmt.Sprintf("http://%s:%d/cluster/membership/remove-node", host, port)
+	body, err := json.Marshal(removeNodeRequest{NodeID: nodeID})
+	if err != nil {
+		return nil, fmt.Errorf("marshalling remove-node request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusServiceUnavailable {
+		var errResp struct {
+			Error    string  `json:"error"`
+			LeaderID *uint64 `json:"leader_id"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&errResp)
+		return nil, &ErrNotLeader{LeaderID: errResp.LeaderID}
+	}
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("membership/remove-node returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var out RemoveNodeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("decoding remove-node response: %w", err)
 	}
 	return &out, nil
 }

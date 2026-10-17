@@ -73,7 +73,7 @@ func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, cl
 	writeServerSection(&b, spec)
 	writeStorageSection(&b, spec)
 	writeFlushSection(&b, spec)
-	writeChdbSection(&b, spec)
+	writeChdbSection(&b, cluster)
 	writeAuthSection(&b, spec)
 	writeCardinalitySection(&b, spec)
 	writeLoggingSection(&b, spec)
@@ -82,7 +82,7 @@ func renderConfigTOMLWithClusterEnabled(cluster *v1alpha1.HyperbytedbCluster, cl
 	writeRateLimitSection(&b, spec)
 	writeRetentionSection(&b, spec)
 	writeClusterSection(&b, cluster, clusterEnabled)
-	writeShardingSection(&b, spec)
+	writeShardingSection(&b, cluster)
 
 	return b.String()
 }
@@ -150,13 +150,26 @@ func writeFlushSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec
 	fmt.Fprintf(b, "arrow_wal_enabled = %t\n", arrowWALEnabled)
 }
 
-func writeChdbSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
+func writeChdbSection(b *strings.Builder, cluster *v1alpha1.HyperbytedbCluster) {
+	spec := &cluster.Spec
 	b.WriteString("\n[chdb]\n")
 	sessionPath := defaultChdbSessionPath
 	if spec.ChDB.SessionDataPath != "" {
 		sessionPath = spec.ChDB.SessionDataPath
 	}
 	fmt.Fprintf(b, "session_data_path = \"%s\"\n", sessionPath)
+	if !Supports(cluster, CapabilitySplitChdbPools) {
+		// One pool for both; query_pool_size would be ignored.
+		pool := spec.ChDB.PoolSize
+		if pool <= 0 {
+			pool = spec.ChDB.QueryPoolSize
+		}
+		if pool <= 0 {
+			pool = 1
+		}
+		fmt.Fprintf(b, "pool_size = %d\n", pool)
+		return
+	}
 	if spec.ChDB.QueryPoolSize > 0 {
 		fmt.Fprintf(b, "query_pool_size = %d\n", spec.ChDB.QueryPoolSize)
 	}
@@ -164,11 +177,17 @@ func writeChdbSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec)
 		fmt.Fprintf(b, "write_pool_size = %d\n", spec.ChDB.WritePoolSize)
 	}
 	if spec.ChDB.QueryPoolSize <= 0 && spec.ChDB.WritePoolSize <= 0 {
-		poolSize := int32(1)
-		if spec.ChDB.PoolSize > 0 {
-			poolSize = spec.ChDB.PoolSize
+		switch {
+		case spec.ChDB.PoolSize > 0:
+			fmt.Fprintf(b, "pool_size = %d\n", spec.ChDB.PoolSize)
+		case Supports(cluster, CapabilityAutoQueryPool):
+			// The database sizes the query pool from its CPU limit (and
+			// `SET query_pool_size` changes it); a fixed number here would
+			// override that. The write pool keeps operator v0.1.x's 1.
+			b.WriteString("write_pool_size = 1\n")
+		default:
+			b.WriteString("pool_size = 1\n")
 		}
-		fmt.Fprintf(b, "pool_size = %d\n", poolSize)
 	}
 }
 
@@ -193,7 +212,7 @@ func writeCardinalitySection(b *strings.Builder, spec *v1alpha1.HyperbytedbClust
 
 func writeLoggingSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
 	b.WriteString("\n[logging]\n")
-	level := "info"
+	level := defaultLogLevel
 	if spec.Logging.Level != "" {
 		level = spec.Logging.Level
 	}
@@ -273,6 +292,9 @@ func writeClusterSection(b *strings.Builder, cluster *v1alpha1.HyperbytedbCluste
 	b.WriteString("peers = \"\"\n")
 	fmt.Fprintf(b, "replication_log_dir = \"%s\"\n", defaultReplLogDir)
 	fmt.Fprintf(b, "raft_dir = \"%s\"\n", defaultRaftDir)
+	if ControlListenerEnabled(cluster, clusterEnabled) {
+		fmt.Fprintf(b, "control_port = %d\n", ControlPort(cluster))
+	}
 
 	heartbeatInterval := int32(2)
 	if spec.Cluster.HeartbeatIntervalSecs > 0 {
@@ -363,8 +385,9 @@ func writeMinAcks(b *strings.Builder, v *intstr.IntOrString) {
 	}
 }
 
-func writeShardingSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterSpec) {
-	if spec.Sharding == nil {
+func writeShardingSection(b *strings.Builder, cluster *v1alpha1.HyperbytedbCluster) {
+	spec := &cluster.Spec
+	if spec.Sharding == nil || !Supports(cluster, CapabilitySharding) {
 		return
 	}
 	s := spec.Sharding
@@ -396,6 +419,14 @@ func writeShardingSection(b *strings.Builder, spec *v1alpha1.HyperbytedbClusterS
 	}
 	if s.PrimaryFailoverAfterSecs > 0 {
 		fmt.Fprintf(b, "primary_failover_after_secs = %d\n", s.PrimaryFailoverAfterSecs)
+	}
+	// Emitted only when explicitly set, so the server keeps its own default
+	// (on) rather than this silently pinning the value.
+	if s.AddPeerProposalsEnabled != nil {
+		fmt.Fprintf(b, "add_peer_proposals_enabled = %t\n", *s.AddPeerProposalsEnabled)
+	}
+	if s.RemovePeerProposalsEnabled != nil {
+		fmt.Fprintf(b, "remove_peer_proposals_enabled = %t\n", *s.RemovePeerProposalsEnabled)
 	}
 	if s.ScatterPeerTimeoutMs > 0 {
 		fmt.Fprintf(b, "scatter_peer_timeout_ms = %d\n", s.ScatterPeerTimeoutMs)
