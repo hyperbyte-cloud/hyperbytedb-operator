@@ -562,7 +562,9 @@ func (r *HyperbytedbClusterReconciler) reconcileRollingRestart(
 		return nil, nil
 	}
 
-	proxyPort := hyperbytedb.ServerPort(cluster)
+	// The proxies' admin API: its own listener from proxy 0.9.0-beta, else
+	// the proxy's client port (spec.proxy.port, not the database's).
+	proxyPort := hyperbytedb.ProxyAdminPort(cluster)
 	stsName := hyperbytedb.StatefulSetName(cluster)
 
 	state, err := r.ensureRollingRestartState(ctx, cluster, replicas)

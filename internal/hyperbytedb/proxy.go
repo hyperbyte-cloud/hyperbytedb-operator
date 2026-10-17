@@ -57,6 +57,27 @@ func proxyLabels(cluster *v1alpha1.HyperbytedbCluster) map[string]string {
 	}
 }
 
+const (
+	// proxyAdminListenPort is where a proxy with its own admin listener
+	// serves probes, metrics and /admin: the proxy's default, set explicitly.
+	proxyAdminListenPort int32 = 8087
+	// proxyAdminPortName names that port on the proxy container.
+	proxyAdminPortName = "admin"
+)
+
+// ProxyAdminPort is the port of the proxy's /healthz, /readyz, /metrics and
+// /admin API: its own admin listener from 0.9.0-beta, the client port
+// before. It is not on the client Service; the operator calls pods by IP.
+func ProxyAdminPort(cluster *v1alpha1.HyperbytedbCluster) int32 {
+	if !ProxySupports(cluster, CapabilityProxyAdminListener) {
+		return proxyPort(cluster)
+	}
+	if proxyPort(cluster) == proxyAdminListenPort {
+		return proxyAdminListenPort + 1
+	}
+	return proxyAdminListenPort
+}
+
 func proxyPort(cluster *v1alpha1.HyperbytedbCluster) int32 {
 	if cluster.Spec.Proxy != nil && cluster.Spec.Proxy.Port > 0 {
 		return cluster.Spec.Proxy.Port
@@ -175,6 +196,29 @@ func BuildProxyDeployment(cluster *v1alpha1.HyperbytedbCluster) *appsv1.Deployme
 		env = append(env, corev1.EnvVar{Name: "LOG_FORMAT", Value: "json"})
 	}
 
+	// From 0.9.0-beta the proxy serves probes on its admin listener and
+	// answers 404 for them on the client port; probing the client port kept
+	// such a proxy restarting and never ready.
+	ports := []corev1.ContainerPort{{
+		Name:          httpPortName,
+		ContainerPort: port,
+		Protocol:      corev1.ProtocolTCP,
+	}}
+	probePort := httpPortName
+	if ProxySupports(cluster, CapabilityProxyAdminListener) {
+		admin := ProxyAdminPort(cluster)
+		env = append(env, corev1.EnvVar{
+			Name:  "HYPERBYTEDB_PROXY_ADMIN_LISTEN",
+			Value: fmt.Sprintf("0.0.0.0:%d", admin),
+		})
+		ports = append(ports, corev1.ContainerPort{
+			Name:          proxyAdminPortName,
+			ContainerPort: admin,
+			Protocol:      corev1.ProtocolTCP,
+		})
+		probePort = proxyAdminPortName
+	}
+
 	podLabels := make(map[string]string)
 	maps.Copy(podLabels, proxyLabels(cluster))
 	maps.Copy(podLabels, spec.PodLabels)
@@ -187,18 +231,12 @@ func BuildProxyDeployment(cluster *v1alpha1.HyperbytedbCluster) *appsv1.Deployme
 		Image:           image,
 		ImagePullPolicy: pullPolicy,
 		Env:             env,
-		Ports: []corev1.ContainerPort{
-			{
-				Name:          "http",
-				ContainerPort: port,
-				Protocol:      corev1.ProtocolTCP,
-			},
-		},
+		Ports:           ports,
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
 					Path: "/healthz",
-					Port: intstr.FromString("http"),
+					Port: intstr.FromString(probePort),
 				},
 			},
 			InitialDelaySeconds: 2,
@@ -209,7 +247,7 @@ func BuildProxyDeployment(cluster *v1alpha1.HyperbytedbCluster) *appsv1.Deployme
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
 					Path: "/readyz",
-					Port: intstr.FromString("http"),
+					Port: intstr.FromString(probePort),
 				},
 			},
 			InitialDelaySeconds: 1,

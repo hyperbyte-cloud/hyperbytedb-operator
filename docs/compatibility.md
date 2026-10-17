@@ -32,11 +32,12 @@ Reasons: `Supported`, `Assumed` (no version found), `NewerThanKnown`
 
 | Operator | Renders for HyperbyteDB | Newest known |
 |---|---|---|
+| v0.3.1 | 0.8.0 and later | 0.9.1-beta |
 | v0.3.0 | 0.8.0 and later | 0.9.1-beta |
 | v0.2.0 | 0.8.0 and later | 0.9.0-beta |
 | v0.1.x | not version-aware: renders the newest keys for every cluster (0.8.x ignores the ones it does not know) | — |
 
-What v0.3.0 renders per version:
+What v0.3.1 renders per version:
 
 | Capability | HyperbyteDB | For older versions the operator |
 |---|---|---|
@@ -46,6 +47,7 @@ What v0.3.0 renders per version:
 | Control listener (`control-listener` annotation) | 0.9.0-beta | ignores the annotation; liveness stays on the server port |
 | Evacuate together (`evacuate-together` annotation) | 0.9.0-beta | ignores the annotation; departing nodes leave one at a time |
 | Cluster auth (`spec.auth.enabled`: auth Secret, cluster token, bootstrap admin) | 0.9.1-beta | renders `auth.enabled` only; no Secret, so a cluster with auth on cannot reach its own internal routes |
+| Proxy admin listener (probes, `/metrics`, `/admin` on port 8087; the proxy's version is its image tag, else the cluster's) | 0.9.0-beta (proxy) | probes the proxy and calls its admin API on the proxy's client port, where older proxies serve them |
 | Parallel pod management (`parallel-pods` annotation) | any | — (operator only) |
 
 The source of truth is `CompatibilityMatrix` in
@@ -53,6 +55,13 @@ The source of truth is `CompatibilityMatrix` in
 
 ## Upgrading
 
+- v0.3.0 → v0.3.1: a proxy on 0.9.0-beta or later is probed on its admin
+  listener (port 8087, or 8088 when the proxy's client port is 8087).
+  v0.3.0 probed `/healthz` and `/readyz` on the client port, where those
+  proxies answer 404, so the proxy restarted forever, never became ready,
+  and every request through it failed with 502. The proxy Deployment of
+  such a cluster rolls once; a 0.8.x proxy's does not change. The admin
+  port is not on the proxy's Service.
 - v0.2.0 → v0.3.0: cluster auth needs HyperbyteDB 0.9.1-beta (0.9.0-beta
   has no cluster token and refuses the key). A cluster with
   `spec.auth.enabled` that resolves to 0.9.0-beta gets no auth Secret env,
