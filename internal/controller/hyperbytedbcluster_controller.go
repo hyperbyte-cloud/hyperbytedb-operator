@@ -218,8 +218,9 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// 6b. Operator-driven rolling restart coordination. When the StatefulSet
 	// has a pending rolling update and the proxy is enabled, the operator
-	// orchestrates pod-by-pod exclusion from the proxy, drain wait, pod
-	// deletion, and inclusion after the replacement pod is healthy.
+	// orchestrates pod-by-pod, highest ordinal first: exclusion from the
+	// proxy, drain wait, release through the partition (rolloutPartition),
+	// and inclusion once the replacement pod is Ready.
 	if hyperbytedb.ProxyEnabled(cluster) {
 		if result, err := r.reconcileRollingRestart(ctx, cluster, stsResult, replicas); err != nil {
 			return r.setFailedStatus(ctx, cluster, "RollingRestartFailed", err)
@@ -476,6 +477,11 @@ type stsReconcileResult struct {
 
 func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, configHash string) (stsReconcileResult, error) {
 	desired := hyperbytedb.BuildStatefulSet(cluster, configHash)
+	if hyperbytedb.ProxyEnabled(cluster) {
+		desired.Spec.UpdateStrategy.RollingUpdate = &appsv1.RollingUpdateStatefulSetStrategy{
+			Partition: ptr.To(rolloutPartition(cluster, *desired.Spec.Replicas)),
+		}
+	}
 	if err := controllerutil.SetControllerReference(cluster, desired, r.Scheme); err != nil {
 		return stsReconcileResult{}, err
 	}
@@ -517,20 +523,10 @@ func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context,
 	existing.Spec.Template.Spec.TopologySpreadConstraints = desired.Spec.Template.Spec.TopologySpreadConstraints
 	existing.Spec.Template.Annotations = desired.Spec.Template.Annotations
 	existing.Spec.Template.Labels = desired.Spec.Template.Labels
+	// With the proxy enabled this carries the partition from
+	// rolloutPartition; without it, partition 0 and the StatefulSet
+	// controller rolls pods itself.
 	existing.Spec.UpdateStrategy = desired.Spec.UpdateStrategy
-
-	// When the proxy is enabled the operator drives pod lifecycle itself
-	// (exclude → drain → delete → include) so there is no need to pin
-	// the StatefulSet partition.  Clear any leftover partition from a
-	// previous operator version so the STS controller can reconcile
-	// normally after the operator coordination finishes.
-	if existing.Spec.UpdateStrategy.RollingUpdate != nil &&
-		existing.Spec.UpdateStrategy.RollingUpdate.Partition != nil &&
-		*existing.Spec.UpdateStrategy.RollingUpdate.Partition != 0 {
-		existing.Spec.UpdateStrategy.RollingUpdate = &appsv1.RollingUpdateStatefulSetStrategy{
-			Partition: ptr.To(int32(0)),
-		}
-	}
 
 	if err := r.Update(ctx, existing); err != nil {
 		return stsReconcileResult{}, err
@@ -541,6 +537,50 @@ func (r *HyperbytedbClusterReconciler) reconcileStatefulSet(ctx context.Context,
 		ReadyReplicas:  existing.Status.ReadyReplicas,
 		StatusReplicas: existing.Status.Replicas,
 	}, nil
+}
+
+// rolloutPartition is the StatefulSet partition while the operator drives
+// rollouts (proxy enabled). With partition 0 the StatefulSet controller
+// replaced each pod as soon as the template changed, before the proxy had
+// excluded it, and the operator then deleted the replacement again: every
+// rollout restarted pods twice. Pinned, a pod only moves to the new revision
+// once the operator releases its ordinal, highest first, after the exclude
+// and drain.
+func rolloutPartition(cluster *hyperbytedbv1alpha1.HyperbytedbCluster, replicas int32) int32 {
+	state := cluster.Status.RollingRestart
+	if state == nil {
+		return replicas
+	}
+	switch state.Phase {
+	case hyperbytedbv1alpha1.RollingRestartCompleted:
+		return 0
+	case hyperbytedbv1alpha1.RollingRestartWaitingReady:
+		return state.CurrentOrdinal
+	default:
+		return state.CurrentOrdinal + 1
+	}
+}
+
+// releaseOrdinal lowers the StatefulSet partition to ordinal, so the
+// StatefulSet controller replaces that pod with the update revision. It
+// never raises it: the pods above are already updated.
+func (r *HyperbytedbClusterReconciler) releaseOrdinal(ctx context.Context, cluster *hyperbytedbv1alpha1.HyperbytedbCluster, ordinal int32) error {
+	sts := &appsv1.StatefulSet{}
+	if err := r.Get(ctx, types.NamespacedName{
+		Name: hyperbytedb.StatefulSetName(cluster), Namespace: cluster.Namespace,
+	}, sts); err != nil {
+		return err
+	}
+	ru := sts.Spec.UpdateStrategy.RollingUpdate
+	if ru != nil && ru.Partition != nil && *ru.Partition <= ordinal {
+		return nil
+	}
+	patch := client.MergeFrom(sts.DeepCopy())
+	if ru == nil {
+		sts.Spec.UpdateStrategy.RollingUpdate = &appsv1.RollingUpdateStatefulSetStrategy{}
+	}
+	sts.Spec.UpdateStrategy.RollingUpdate.Partition = ptr.To(ordinal)
+	return r.Patch(ctx, sts, patch)
 }
 
 // ---------- Rolling Restart Coordination ----------
@@ -601,13 +641,14 @@ func (r *HyperbytedbClusterReconciler) reconcileRollingRestart(
 	podName := fmt.Sprintf("%s-%d", stsName, state.CurrentOrdinal)
 	requeue3s := ctrl.Result{RequeueAfter: 3 * time.Second}
 
+	updateRevision := curSTS.Status.UpdateRevision
 	switch state.Phase {
 	case hyperbytedbv1alpha1.RollingRestartExcluding:
-		return r.rollingRestartExcluding(ctx, cluster, state, podName, proxyPort, requeue3s)
+		return r.rollingRestartExcluding(ctx, cluster, state, podName, updateRevision, proxyPort, requeue3s)
 	case hyperbytedbv1alpha1.RollingRestartDraining:
 		return r.rollingRestartDraining(ctx, cluster, state, podName, requeue3s)
 	case hyperbytedbv1alpha1.RollingRestartWaitingReady:
-		return r.rollingRestartWaitingReady(ctx, cluster, state, podName, proxyPort, requeue3s)
+		return r.rollingRestartWaitingReady(ctx, cluster, state, podName, updateRevision, proxyPort, requeue3s)
 	case hyperbytedbv1alpha1.RollingRestartCompleted:
 		return &requeue3s, nil
 	default:
@@ -646,9 +687,12 @@ func (r *HyperbytedbClusterReconciler) ensureRollingRestartState(
 	replicas int32,
 ) (*hyperbytedbv1alpha1.RollingRestartState, error) {
 	log := logf.FromContext(ctx)
+	// Highest ordinal first: the StatefulSet partition releases every
+	// ordinal at or above it.
+	first := max(replicas-1, 0)
 	if cluster.Status.RollingRestart == nil {
 		cluster.Status.RollingRestart = &hyperbytedbv1alpha1.RollingRestartState{
-			CurrentOrdinal: 0,
+			CurrentOrdinal: first,
 			TotalOrdinals:  replicas,
 			Phase:          hyperbytedbv1alpha1.RollingRestartExcluding,
 			PhaseStartedAt: metav1.Now(),
@@ -662,7 +706,7 @@ func (r *HyperbytedbClusterReconciler) ensureRollingRestartState(
 	state := cluster.Status.RollingRestart
 	if state == nil {
 		state = &hyperbytedbv1alpha1.RollingRestartState{
-			CurrentOrdinal: 0,
+			CurrentOrdinal: first,
 			TotalOrdinals:  replicas,
 			Phase:          hyperbytedbv1alpha1.RollingRestartExcluding,
 			PhaseStartedAt: metav1.Now(),
@@ -680,6 +724,7 @@ func (r *HyperbytedbClusterReconciler) rollingRestartExcluding(
 	cluster *hyperbytedbv1alpha1.HyperbytedbCluster,
 	state *hyperbytedbv1alpha1.RollingRestartState,
 	podName string,
+	updateRevision string,
 	proxyPort int32,
 	requeue ctrl.Result,
 ) (*ctrl.Result, error) {
@@ -687,14 +732,16 @@ func (r *HyperbytedbClusterReconciler) rollingRestartExcluding(
 	pod := &corev1.Pod{}
 	if err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: cluster.Namespace}, pod); err != nil {
 		if apierrors.IsNotFound(err) {
-			state.Phase = hyperbytedbv1alpha1.RollingRestartWaitingReady
-			state.PhaseStartedAt = metav1.Now()
-			if err := r.Status().Update(ctx, cluster); err != nil {
-				return nil, err
-			}
-			return &requeue, nil
+			return r.rollingRestartRelease(ctx, cluster, state, requeue)
 		}
 		return nil, err
+	}
+	// Already on the new revision (it crashed and came back, or a rollout
+	// begun by an older operator replaced it): restarting it again is the
+	// double restart this coordination exists to prevent.
+	if updateRevision != "" && pod.Labels[appsv1.StatefulSetRevisionLabel] == updateRevision {
+		log.Info("Pod already runs the update revision, not restarting it", "pod", podName)
+		return r.rollingRestartRelease(ctx, cluster, state, requeue)
 	}
 
 	podIP := pod.Status.PodIP
@@ -705,13 +752,20 @@ func (r *HyperbytedbClusterReconciler) rollingRestartExcluding(
 	state.OldPodIP = podIP
 
 	if err := r.excludeFromAllProxies(ctx, cluster, podIP, proxyPort); err != nil {
-		log.V(1).Info("Could not exclude backend from proxy, will retry", "pod", podName, "ip", podIP, "error", err)
-		return &requeue, nil
+		// The partition holds the rollout until the operator releases each
+		// pod, so a proxy that refuses the exclude must not hold it forever.
+		if time.Since(state.PhaseStartedAt.Time) < proxyCallTimeout {
+			log.V(1).Info("Could not exclude backend from proxy, will retry", "pod", podName, "ip", podIP, "error", err)
+			return &requeue, nil
+		}
+		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, "BackendExcludeFailed",
+			"Restarting pod %s without excluding it from the proxy: %v", podName, err)
+	} else {
+		log.Info("Excluded backend from proxy", "pod", podName, "ip", podIP)
+		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, "BackendExcluded",
+			"Excluded pod %s (%s) from proxy routing", podName, podIP)
+		state.ExcludeConfirmed = true
 	}
-	log.Info("Excluded backend from proxy", "pod", podName, "ip", podIP)
-	r.Recorder.Eventf(cluster, corev1.EventTypeNormal, "BackendExcluded",
-		"Excluded pod %s (%s) from proxy routing", podName, podIP)
-	state.ExcludeConfirmed = true
 	state.Phase = hyperbytedbv1alpha1.RollingRestartDraining
 	state.PhaseStartedAt = metav1.Now()
 	if err := r.Status().Update(ctx, cluster); err != nil {
@@ -739,25 +793,23 @@ func (r *HyperbytedbClusterReconciler) rollingRestartDraining(
 		return &ctrl.Result{RequeueAfter: drainWait - elapsed + time.Second}, nil
 	}
 
-	pod := &corev1.Pod{}
-	if err := r.Get(ctx, types.NamespacedName{Name: podName, Namespace: cluster.Namespace}, pod); err != nil {
-		if apierrors.IsNotFound(err) {
-			state.Phase = hyperbytedbv1alpha1.RollingRestartWaitingReady
-			state.PhaseStartedAt = metav1.Now()
-			if err := r.Status().Update(ctx, cluster); err != nil {
-				return nil, err
-			}
-			return &requeue, nil
-		}
-		return nil, err
-	}
-
-	if err := r.Delete(ctx, pod); err != nil && !apierrors.IsNotFound(err) {
-		return nil, fmt.Errorf("deleting pod %s for rolling restart: %w", podName, err)
-	}
-	log.Info("Deleted pod for rolling restart", "pod", podName)
+	log.Info("Releasing pod to the update revision", "pod", podName)
 	r.Recorder.Eventf(cluster, corev1.EventTypeNormal, "PodRestarted",
-		"Deleted pod %s for rolling upgrade", podName)
+		"Released pod %s for rolling upgrade", podName)
+	return r.rollingRestartRelease(ctx, cluster, state, requeue)
+}
+
+// rollingRestartRelease lowers the partition to the current ordinal (the
+// StatefulSet controller then replaces that pod, once) and waits for it.
+func (r *HyperbytedbClusterReconciler) rollingRestartRelease(
+	ctx context.Context,
+	cluster *hyperbytedbv1alpha1.HyperbytedbCluster,
+	state *hyperbytedbv1alpha1.RollingRestartState,
+	requeue ctrl.Result,
+) (*ctrl.Result, error) {
+	if err := r.releaseOrdinal(ctx, cluster, state.CurrentOrdinal); err != nil {
+		return nil, fmt.Errorf("releasing ordinal %d for rolling restart: %w", state.CurrentOrdinal, err)
+	}
 	state.Phase = hyperbytedbv1alpha1.RollingRestartWaitingReady
 	state.PhaseStartedAt = metav1.Now()
 	if err := r.Status().Update(ctx, cluster); err != nil {
@@ -771,6 +823,7 @@ func (r *HyperbytedbClusterReconciler) rollingRestartWaitingReady(
 	cluster *hyperbytedbv1alpha1.HyperbytedbCluster,
 	state *hyperbytedbv1alpha1.RollingRestartState,
 	podName string,
+	updateRevision string,
 	proxyPort int32,
 	requeue ctrl.Result,
 ) (*ctrl.Result, error) {
@@ -784,6 +837,12 @@ func (r *HyperbytedbClusterReconciler) rollingRestartWaitingReady(
 		return nil, err
 	}
 
+	// Until the StatefulSet controller acts on the partition the old pod is
+	// still here, Ready.
+	if updateRevision != "" && pod.Labels[appsv1.StatefulSetRevisionLabel] != updateRevision {
+		log.Info("Waiting for the StatefulSet to replace the pod", "pod", podName)
+		return &requeue, nil
+	}
 	if !isPodReady(pod) || pod.DeletionTimestamp != nil {
 		if pod.DeletionTimestamp != nil {
 			log.Info("Old pod still terminating, waiting for replacement", "pod", podName)
@@ -800,15 +859,20 @@ func (r *HyperbytedbClusterReconciler) rollingRestartWaitingReady(
 	}
 
 	if err := r.includeFromAllProxies(ctx, cluster, newIP, proxyPort); err != nil {
-		log.V(1).Info("Could not include backend in proxy, will retry", "pod", podName, "ip", newIP, "error", err)
-		return &requeue, nil
+		// PhaseStartedAt includes the pod's own restart, so allow for that.
+		if time.Since(state.PhaseStartedAt.Time) < proxyCallTimeout+podRestartAllowance {
+			log.V(1).Info("Could not include backend in proxy, will retry", "pod", podName, "ip", newIP, "error", err)
+			return &requeue, nil
+		}
+		r.Recorder.Eventf(cluster, corev1.EventTypeWarning, "BackendIncludeFailed",
+			"Moving on without including pod %s (%s) in the proxy: %v", podName, newIP, err)
+	} else {
+		log.Info("Included backend in proxy", "pod", podName, "ip", newIP)
+		r.Recorder.Eventf(cluster, corev1.EventTypeNormal, "BackendIncluded",
+			"Included pod %s (%s) in proxy routing", podName, newIP)
 	}
-	log.Info("Included backend in proxy", "pod", podName, "ip", newIP)
-	r.Recorder.Eventf(cluster, corev1.EventTypeNormal, "BackendIncluded",
-		"Included pod %s (%s) in proxy routing", podName, newIP)
 
-	state.CurrentOrdinal++
-	if state.CurrentOrdinal >= state.TotalOrdinals {
+	if state.CurrentOrdinal <= 0 {
 		state.Phase = hyperbytedbv1alpha1.RollingRestartCompleted
 		state.PhaseStartedAt = metav1.Now()
 		if err := r.Status().Update(ctx, cluster); err != nil {
@@ -818,6 +882,7 @@ func (r *HyperbytedbClusterReconciler) rollingRestartWaitingReady(
 		return &ctrl.Result{RequeueAfter: 3 * time.Second}, nil
 	}
 
+	state.CurrentOrdinal--
 	state.Phase = hyperbytedbv1alpha1.RollingRestartExcluding
 	state.PhaseStartedAt = metav1.Now()
 	state.ExcludeConfirmed = false
@@ -827,6 +892,14 @@ func (r *HyperbytedbClusterReconciler) rollingRestartWaitingReady(
 	}
 	return &requeue, nil
 }
+
+// How long a rolling restart retries an exclude or include on a running
+// proxy before it moves on without it, and the extra allowance for the
+// restart itself on the include.
+const (
+	proxyCallTimeout    = 2 * time.Minute
+	podRestartAllowance = 10 * time.Minute
+)
 
 // isPodReady returns true if the pod has a Ready condition with Status=True.
 func isPodReady(pod *corev1.Pod) bool {
