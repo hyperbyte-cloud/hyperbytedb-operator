@@ -31,6 +31,12 @@ const (
 	annotationTrue = "true"
 )
 
+// Pod volumes the init containers fill for the database container.
+const (
+	sharedVolumeName     = "shared"
+	entrypointVolumeName = "entrypoint"
+)
+
 func StatefulSetName(cluster *v1alpha1.HyperbytedbCluster) string {
 	return cluster.Name
 }
@@ -90,13 +96,13 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 			},
 		},
 		{
-			Name: "shared",
+			Name: sharedVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			},
 		},
 		{
-			Name: "entrypoint",
+			Name: entrypointVolumeName,
 			VolumeSource: corev1.VolumeSource{
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			},
@@ -129,7 +135,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 			Image:   "busybox:1.36",
 			Command: []string{"sh", "-c", initScript},
 			VolumeMounts: []corev1.VolumeMount{
-				{Name: "shared", MountPath: "/shared"},
+				{Name: sharedVolumeName, MountPath: "/shared"},
 			},
 		},
 		{
@@ -137,7 +143,7 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 			Image:   "busybox:1.36",
 			Command: []string{"sh", "-c", "printf '%s' '" + entrypoint + "' > /entrypoint/start.sh && chmod +x /entrypoint/start.sh"},
 			VolumeMounts: []corev1.VolumeMount{
-				{Name: "entrypoint", MountPath: "/entrypoint"},
+				{Name: entrypointVolumeName, MountPath: "/entrypoint"},
 			},
 		},
 	}
@@ -174,8 +180,8 @@ exec hyperbytedb --config /etc/hyperbytedb/config.toml serve
 	volumeMounts := []corev1.VolumeMount{
 		{Name: "data", MountPath: "/var/lib/hyperbytedb"},
 		{Name: "config", MountPath: "/etc/hyperbytedb", ReadOnly: true},
-		{Name: "shared", MountPath: "/shared", ReadOnly: true},
-		{Name: "entrypoint", MountPath: "/entrypoint", ReadOnly: true},
+		{Name: sharedVolumeName, MountPath: "/shared", ReadOnly: true},
+		{Name: entrypointVolumeName, MountPath: "/entrypoint", ReadOnly: true},
 	}
 
 	if cluster.Spec.Server.TLS != nil && cluster.Spec.Server.TLS.Enabled {

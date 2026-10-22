@@ -63,16 +63,22 @@ type CompatibilityEntry struct {
 	Without string
 }
 
+// version090Beta introduced most of the capabilities below.
+const version090Beta = "0.9.0-beta"
+
+// sourceAssumed is a DatabaseVersion's Source when no version was found.
+const sourceAssumed = "assumed"
+
 // CompatibilityMatrix lists what each capability needs. docs/compatibility.md
 // is generated from the same facts; keep them in step.
 var CompatibilityMatrix = []CompatibilityEntry{
-	{CapabilitySplitChdbPools, "0.9.0-beta", "writes pool_size (spec.chdb.poolSize, else queryPoolSize, else 1) for both pools"},
-	{CapabilityAutoQueryPool, "0.9.0-beta", "an unset query pool is written as pool_size = 1, as operator v0.1.x did"},
-	{CapabilitySharding, "0.9.0-beta", "omits the [sharding] section; spec.sharding has no effect"},
-	{CapabilityControlListener, "0.9.0-beta", "ignores the control-listener annotation (no control port, liveness on the server port)"},
-	{CapabilityEvacuateTogether, "0.9.0-beta", "ignores the evacuate-together annotation (departing nodes leave one at a time)"},
+	{CapabilitySplitChdbPools, version090Beta, "writes pool_size (spec.chdb.poolSize, else queryPoolSize, else 1) for both pools"},
+	{CapabilityAutoQueryPool, version090Beta, "an unset query pool is written as pool_size = 1, as operator v0.1.x did"},
+	{CapabilitySharding, version090Beta, "omits the [sharding] section; spec.sharding has no effect"},
+	{CapabilityControlListener, version090Beta, "ignores the control-listener annotation (no control port, liveness on the server port)"},
+	{CapabilityEvacuateTogether, version090Beta, "ignores the evacuate-together annotation (departing nodes leave one at a time)"},
 	{CapabilityClusterAuth, "0.9.1-beta", "renders auth.enabled only; no auth Secret, so a cluster with auth on cannot reach its internal routes"},
-	{CapabilityProxyAdminListener, "0.9.0-beta", "probes the proxy and calls its admin API on its client port, where proxies before 0.9.0-beta serve them"},
+	{CapabilityProxyAdminListener, version090Beta, "probes the proxy and calls its admin API on its client port, where proxies before 0.9.0-beta serve them"},
 }
 
 // DatabaseVersion is the HyperbyteDB version a cluster is rendered for.
@@ -128,7 +134,7 @@ func ResolveDatabaseVersion(cluster *v1alpha1.HyperbytedbCluster) DatabaseVersio
 		}
 	}
 	v, _ := parseDatabaseVersion(LatestDatabaseVersion)
-	return DatabaseVersion{Version: v, Source: "assumed", Raw: LatestDatabaseVersion}
+	return DatabaseVersion{Version: v, Source: sourceAssumed, Raw: LatestDatabaseVersion}
 }
 
 // ResolveProxyVersion is the version of the proxy the cluster runs: the tag
@@ -175,7 +181,7 @@ func CompatibilitySummary(cluster *v1alpha1.HyperbytedbCluster) (reason, message
 	}
 	reason = "Supported"
 	switch {
-	case dv.Source == "assumed":
+	case dv.Source == sourceAssumed:
 		reason = "Assumed"
 	case dv.Version.Compare(semver.MustParse(OldestDatabaseVersion)) < 0:
 		reason = "OlderThanSupported"
@@ -183,7 +189,7 @@ func CompatibilitySummary(cluster *v1alpha1.HyperbytedbCluster) (reason, message
 		reason = "NewerThanKnown"
 	}
 	message = fmt.Sprintf("HyperbyteDB %s (from %s)", dv, dv.Source)
-	if dv.Source == "assumed" {
+	if dv.Source == sourceAssumed {
 		message += fmt.Sprintf("; set %s or a version image tag to pin it", DatabaseVersionAnnotation)
 	}
 	if len(missing) > 0 {

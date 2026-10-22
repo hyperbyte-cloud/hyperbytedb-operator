@@ -45,6 +45,11 @@ linters:
           - dupl
           - lll
         path: internal/*
+      # goconst stopped ignoring tests (golangci-lint v2.8 -> v2.15); repeated
+      # literals in table tests are clearer as they are.
+      - linters:
+          - goconst
+        path: _test\.go
     paths:
       - third_party$
       - builtin$

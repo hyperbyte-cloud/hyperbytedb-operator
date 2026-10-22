@@ -51,6 +51,9 @@ const clusterFinalizer = "hyperbytedb.hyperbyte.cloud/finalizer"
 // nodes are within tolerance of each other on parquet file count.
 const replicationStateHealthy = "Healthy"
 
+// Condition set once the Raft cluster has formed.
+const conditionClusterFormed = "ClusterFormed"
+
 // HyperbytedbClusterReconciler reconciles a HyperbytedbCluster object.
 type HyperbytedbClusterReconciler struct {
 	client.Client
@@ -192,7 +195,7 @@ func (r *HyperbytedbClusterReconciler) Reconcile(ctx context.Context, req ctrl.R
 	stsResult, err := r.reconcileStatefulSet(ctx, cluster, configHash)
 	if err != nil {
 		if apierrors.IsConflict(err) {
-			return ctrl.Result{Requeue: true}, nil
+			return ctrl.Result{RequeueAfter: time.Second}, nil
 		}
 		return r.setFailedStatus(ctx, cluster, "StatefulSetFailed", err)
 	}
@@ -1510,7 +1513,7 @@ func (r *HyperbytedbClusterReconciler) reconcileClusterMembership(
 	if leaderHost == "" {
 		log.V(1).Info("Could not locate raft leader from any pod; will retry next reconcile")
 		meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
-			Type:               "ClusterFormed",
+			Type:               conditionClusterFormed,
 			Status:             metav1.ConditionFalse,
 			Reason:             "NoLeader",
 			Message:            "No raft leader reachable yet",
@@ -1586,7 +1589,7 @@ func (r *HyperbytedbClusterReconciler) reconcileClusterMembership(
 
 	if allMembers && len(knownIDs) >= int(replicas) {
 		meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
-			Type:               "ClusterFormed",
+			Type:               conditionClusterFormed,
 			Status:             metav1.ConditionTrue,
 			Reason:             "AllNodesMembers",
 			Message:            fmt.Sprintf("All %d expected nodes are raft members", replicas),
@@ -1594,7 +1597,7 @@ func (r *HyperbytedbClusterReconciler) reconcileClusterMembership(
 		})
 	} else {
 		meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
-			Type:   "ClusterFormed",
+			Type:   conditionClusterFormed,
 			Status: metav1.ConditionFalse,
 			Reason: "MembershipIncomplete",
 			Message: fmt.Sprintf("%d/%d expected nodes are raft members",
