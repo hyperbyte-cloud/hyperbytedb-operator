@@ -32,13 +32,14 @@ Reasons: `Supported`, `Assumed` (no version found), `NewerThanKnown`
 
 | Operator | Renders for HyperbyteDB | Newest known |
 |---|---|---|
+| v0.3.3 | 0.8.0 and later | 0.9.1-beta |
 | v0.3.2 | 0.8.0 and later | 0.9.1-beta |
 | v0.3.1 | 0.8.0 and later | 0.9.1-beta |
 | v0.3.0 | 0.8.0 and later | 0.9.1-beta |
 | v0.2.0 | 0.8.0 and later | 0.9.0-beta |
 | v0.1.x | not version-aware: renders the newest keys for every cluster (0.8.x ignores the ones it does not know) | — |
 
-What v0.3.2 renders per version:
+What v0.3.3 renders per version:
 
 | Capability | HyperbyteDB | For older versions the operator |
 |---|---|---|
@@ -56,6 +57,18 @@ The source of truth is `CompatibilityMatrix` in
 
 ## Upgrading
 
+- v0.3.2 → v0.3.3: each pod restarts once per rolling update. With the
+  proxy enabled the operator pins the StatefulSet's `RollingUpdate`
+  partition, so a pod template change no longer replaces pods by itself;
+  the operator releases one ordinal at a time, highest first, after
+  excluding that pod from the proxies and waiting `drainWaitSecs`. Before,
+  the StatefulSet controller replaced each pod straight away, without the
+  exclude, and the operator then deleted the replacement again. A pod
+  already on the new revision is not restarted. If a running proxy keeps
+  refusing an exclude for 2 minutes the pod is restarted anyway (event
+  `BackendExcludeFailed`), so a broken proxy cannot hold an update. With
+  `spec.proxy.enabled: false` nothing changes. The partition is applied on
+  the first reconcile after the upgrade and restarts nothing.
 - v0.3.1 → v0.3.2: a pool stuck in a rolling restart recovers by itself.
   The proxy Deployment is applied before the rolling restart, so a broken
   proxy is fixed even while a restart waits on it; proxies are excluded
