@@ -22,7 +22,7 @@ const DatabaseVersionAnnotation = "hyperbytedb.hyperbyte.cloud/database-version"
 
 // LatestDatabaseVersion is the newest HyperbyteDB release this operator
 // knows. A cluster whose version cannot be determined is rendered for it.
-const LatestDatabaseVersion = "0.9.1-beta"
+const LatestDatabaseVersion = "0.9.3-beta"
 
 // OldestDatabaseVersion is the oldest HyperbyteDB release this operator
 // renders for. Older ones are rendered as this one.

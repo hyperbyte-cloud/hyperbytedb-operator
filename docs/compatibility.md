@@ -32,7 +32,7 @@ Reasons: `Supported`, `Assumed` (no version found), `NewerThanKnown`
 
 | Operator | Renders for HyperbyteDB | Newest known |
 |---|---|---|
-| v0.3.3 | 0.8.0 and later | 0.9.1-beta |
+| v0.3.3 | 0.8.0 and later | 0.9.3-beta |
 | v0.3.2 | 0.8.0 and later | 0.9.1-beta |
 | v0.3.1 | 0.8.0 and later | 0.9.1-beta |
 | v0.3.0 | 0.8.0 and later | 0.9.1-beta |
@@ -69,6 +69,20 @@ The source of truth is `CompatibilityMatrix` in
   `BackendExcludeFailed`), so a broken proxy cannot hold an update. With
   `spec.proxy.enabled: false` nothing changes. The partition is applied on
   the first reconcile after the upgrade and restarts nothing.
+
+  Backup and restore Jobs use `amazon/aws-cli:2.38.5` instead of
+  `minio/mc`, which is gone from Docker Hub (Jobs on a node without it
+  cached could not start). A custom `spec.destination.s3.endpoint` on a `HyperbytedbBackup` (MinIO and
+  other S3-compatible stores) is addressed path-style; AWS by region;
+  without a credentials Secret the default AWS chain (an IAM role) is used.
+  Retention removes the timestamped backup folders older than
+  `retentionDays`, the same folders `mc` wrote; a restore downloads only the
+  newest one.
+
+  The operator is built with Go 1.27.3 on a current distroless base, which
+  no longer trusts the compromised eMudhra root (CVE-2026-111943); v0.3.2's
+  image does. Newest known HyperbyteDB: 0.9.3-beta, so a 0.9.3-beta cluster
+  no longer reads `NewerThanKnown`. Nothing renders differently for it.
 - v0.3.1 → v0.3.2: a pool stuck in a rolling restart recovers by itself.
   The proxy Deployment is applied before the rolling restart, so a broken
   proxy is fixed even while a restart waits on it; proxies are excluded
