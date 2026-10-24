@@ -220,7 +220,7 @@ func (r *HyperbytedbBackupReconciler) buildBackupJob(backup *hyperbytedbv1alpha1
 				Spec: corev1.PodSpec{
 					RestartPolicy:  corev1.RestartPolicyOnFailure,
 					InitContainers: []corev1.Container{snapshotBackupInitContainer(hyperbytedb.ResolveHyperbytedbImage(cluster))},
-					Containers:     []corev1.Container{mcUploadContainer(s3, backup.Spec.RetentionDays)},
+					Containers:     []corev1.Container{s3UploadContainer(s3, backup.Spec.RetentionDays)},
 					Volumes: []corev1.Volume{
 						dataVolume(cluster.Name, 0, true),
 						snapshotVolume(),

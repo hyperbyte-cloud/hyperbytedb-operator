@@ -256,7 +256,7 @@ func (r *HyperbytedbRestoreReconciler) buildRestoreJob(
 			Template: corev1.PodTemplateSpec{
 				Spec: corev1.PodSpec{
 					RestartPolicy:  corev1.RestartPolicyOnFailure,
-					InitContainers: []corev1.Container{mcDownloadInitContainer(*s3Source)},
+					InitContainers: []corev1.Container{s3DownloadInitContainer(*s3Source)},
 					Containers:     []corev1.Container{restoreDataContainer(hyperbytedb.ResolveHyperbytedbImage(cluster), ordinal)},
 					Volumes: []corev1.Volume{
 						dataVolume(cluster.Name, ordinal, false),

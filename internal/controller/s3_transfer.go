@@ -9,8 +9,13 @@ import (
 	hyperbytedbv1alpha1 "github.com/hyperbyte-cloud/hyperbytedb-operator/api/v1alpha1"
 )
 
-// Same tag Kind already pulls for the MinIO bucket job. The image includes /bin/sh.
-const defaultS3ClientImage = "minio/mc:RELEASE.2024-11-21T17-21-54Z"
+// The S3 client for backup upload and restore download. minio/mc is gone
+// from Docker Hub (and quay.io/minio needs a login), so jobs on a node
+// without it cached could not start. The AWS CLI image is maintained, has
+// /bin/sh, works with MinIO and other S3-compatible stores, and trusts the
+// CA bundle shipped in botocore, which no longer holds the compromised
+// eMudhra emSign ECC Root CA - G3 (CVE-2026-111943).
+const defaultS3ClientImage = "amazon/aws-cli:2.38.5"
 
 const (
 	snapshotVolumeName = "snapshot"
@@ -18,6 +23,11 @@ const (
 	dataVolumeName     = "data"
 	dataMountPath      = "/var/lib/hyperbytedb"
 )
+
+// shellCommand runs script with /bin/sh, stopping at the first failure.
+func shellCommand(script string) []string {
+	return []string{"/bin/sh", "-ec", script}
+}
 
 func s3ClientImage() string {
 	return defaultS3ClientImage
@@ -41,11 +51,27 @@ func s3Prefix(s3 hyperbytedbv1alpha1.S3BackupSpec) string {
 	return p + "/"
 }
 
+func s3Region(s3 hyperbytedbv1alpha1.S3BackupSpec) string {
+	if s3.Region != "" {
+		return s3.Region
+	}
+	return "us-east-1"
+}
+
 func s3Env(s3 hyperbytedbv1alpha1.S3BackupSpec, extra ...corev1.EnvVar) []corev1.EnvVar {
 	env := []corev1.EnvVar{
 		{Name: "S3_ENDPOINT", Value: s3Endpoint(s3)},
 		{Name: "S3_BUCKET", Value: s3.Bucket},
 		{Name: "S3_PREFIX", Value: s3Prefix(s3)},
+		{Name: "AWS_DEFAULT_REGION", Value: s3Region(s3)},
+		// No credential files or config in the image's home: everything
+		// comes from the environment.
+		{Name: "AWS_CONFIG_FILE", Value: "/tmp/aws-config"},
+	}
+	// A custom endpoint (MinIO and other S3-compatible stores) takes
+	// path-style bucket addressing; AWS itself is addressed by region.
+	if s3.Endpoint != "" {
+		env = append(env, corev1.EnvVar{Name: "S3_PATH_STYLE", Value: "1"})
 	}
 	if s3.CredentialsSecretName != "" {
 		env = append(env,
@@ -95,10 +121,10 @@ func snapshotBackupInitContainer(image string) corev1.Container {
 	return corev1.Container{
 		Name:  "snapshot",
 		Image: image,
-		Command: []string{"/bin/sh", "-ec", `echo "Starting hyperbytedb backup..."
+		Command: shellCommand(`echo "Starting hyperbytedb backup..."
 hyperbytedb backup --output /snapshot
 echo "Backup size: $(du -sh /snapshot | cut -f1)"
-`},
+`),
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: dataVolumeName, MountPath: dataMountPath, ReadOnly: true},
 			{Name: snapshotVolumeName, MountPath: snapshotMountPath},
@@ -106,23 +132,46 @@ echo "Backup size: $(du -sh /snapshot | cut -f1)"
 	}
 }
 
-func mcUploadContainer(s3 hyperbytedbv1alpha1.S3BackupSpec, retentionDays int32) corev1.Container {
+// awsSetup is the preamble of every S3 client script: path-style addressing
+// for a custom endpoint, and $EP for the endpoint flag.
+const awsSetup = `if [ -n "${S3_PATH_STYLE:-}" ]; then
+  aws configure set default.s3.addressing_style path
+  EP="--endpoint-url ${S3_ENDPOINT}"
+else
+  EP=""
+fi
+`
+
+func s3UploadContainer(s3 hyperbytedbv1alpha1.S3BackupSpec, retentionDays int32) corev1.Container {
 	if retentionDays < 1 {
 		retentionDays = 7
 	}
-	script := fmt.Sprintf(`mc alias set dest "${S3_ENDPOINT}" "${AWS_ACCESS_KEY_ID}" "${AWS_SECRET_ACCESS_KEY}"
-TIMESTAMP=$(date +%%Y%%m%%d-%%H%%M%%S)
-DEST="dest/${S3_BUCKET}/${S3_PREFIX}${TIMESTAMP}"
+	// Backups go to <prefix><UTC timestamp>/; retention deletes the
+	// timestamped folders older than the cutoff, by name, as mc's
+	// --older-than did by object age.
+	script := awsSetup + fmt.Sprintf(`TIMESTAMP=$(date -u +%%Y%%m%%d-%%H%%M%%S)
+DEST="s3://${S3_BUCKET}/${S3_PREFIX}${TIMESTAMP}/"
 echo "Uploading to ${DEST}..."
-mc mirror /snapshot "${DEST}/"
+aws $EP s3 sync /snapshot "${DEST}" --only-show-errors
 echo "Cleaning up backups older than %d days..."
-mc rm --recursive --force --older-than "%dd" "dest/${S3_BUCKET}/${S3_PREFIX}" || true
+CUTOFF=$(date -u -d "-%d days" +%%Y%%m%%d-%%H%%M%%S)
+aws $EP s3 ls "s3://${S3_BUCKET}/${S3_PREFIX}" | awk '$1 == "PRE" { print $2 }' | while read -r dir; do
+  ts="${dir%%/}"
+  case "$ts" in
+    [0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]) ;;
+    *) continue ;;
+  esac
+  if [ "$ts" \< "$CUTOFF" ]; then
+    echo "Removing ${dir}"
+    aws $EP s3 rm --recursive "s3://${S3_BUCKET}/${S3_PREFIX}${dir}" --only-show-errors
+  fi
+done || true
 echo "Backup complete"
 `, retentionDays, retentionDays)
 	return corev1.Container{
 		Name:    "upload",
 		Image:   s3ClientImage(),
-		Command: []string{"/bin/sh", "-ec", script},
+		Command: shellCommand(script),
 		Env:     s3Env(s3),
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: snapshotVolumeName, MountPath: snapshotMountPath, ReadOnly: true},
@@ -130,15 +179,24 @@ echo "Backup complete"
 	}
 }
 
-func mcDownloadInitContainer(s3 hyperbytedbv1alpha1.S3BackupSpec) corev1.Container {
+// s3DownloadInitContainer fetches the newest timestamped backup under the
+// prefix into /snapshot/<timestamp>/, where the restore step looks for it;
+// with none, the whole prefix (a backup stored at its root).
+func s3DownloadInitContainer(s3 hyperbytedbv1alpha1.S3BackupSpec) corev1.Container {
 	return corev1.Container{
 		Name:  "download",
 		Image: s3ClientImage(),
-		Command: []string{"/bin/sh", "-ec", `mc alias set dest "${S3_ENDPOINT}" "${AWS_ACCESS_KEY_ID}" "${AWS_SECRET_ACCESS_KEY}"
-SRC="dest/${S3_BUCKET}/${S3_PREFIX}"
-echo "Downloading backup from ${SRC}..."
-mc mirror "${SRC}" /snapshot/
-`},
+		Command: shellCommand(awsSetup + `SRC="s3://${S3_BUCKET}/${S3_PREFIX}"
+LATEST=$(aws $EP s3 ls "${SRC}" | awk '$1 == "PRE" { print $2 }' \
+  | grep -E '^[0-9]{8}-[0-9]{6}/$' | sort | tail -1 || true)
+if [ -n "${LATEST}" ]; then
+  echo "Downloading backup ${SRC}${LATEST}..."
+  aws $EP s3 sync "${SRC}${LATEST}" "/snapshot/${LATEST}" --only-show-errors
+else
+  echo "Downloading backup from ${SRC}..."
+  aws $EP s3 sync "${SRC}" /snapshot/ --only-show-errors
+fi
+`),
 		Env: s3Env(s3),
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: snapshotVolumeName, MountPath: snapshotMountPath},
@@ -162,7 +220,7 @@ echo "Restore complete for ordinal %d"
 	return corev1.Container{
 		Name:    "restore",
 		Image:   image,
-		Command: []string{"/bin/sh", "-ec", script},
+		Command: shellCommand(script),
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: dataVolumeName, MountPath: dataMountPath},
 			{Name: snapshotVolumeName, MountPath: snapshotMountPath, ReadOnly: true},
